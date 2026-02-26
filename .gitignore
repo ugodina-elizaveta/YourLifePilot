@@ -1,0 +1,12 @@
+.DS_Store
+.idea
+.*/*
+venv
+*.json
+*.pyc
+*.log
+__pycache__
+*.env
+.coverage
+reports
+.flake8
