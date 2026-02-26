@@ -1,5 +1,7 @@
-BOT_TOKEN = "7504803683:AAEUEb9yplOjOiUsjVZ3GuYXs8ILni8aC-I"
+import os
 
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 # Состояния для ConversationHandler онбординга
 AGREEMENT, Q1, Q2, Q3, Q4, Q5 = range(6)
 

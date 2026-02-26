@@ -1,12 +1,11 @@
 import logging
-import os
 
 from fastapi import FastAPI, Request
 from telegram import Update
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, ConversationHandler
 
 from app.anketa import cancel, q1_handler, q2_handler, q3_handler, q4_handler, q5_handler
-from app.config import AGREEMENT, BOT_TOKEN, Q1, Q2, Q3, Q4, Q5, user_data_store, user_stats_store
+from app.config import AGREEMENT, BOT_TOKEN, Q1, Q2, Q3, Q4, Q5, WEBHOOK_URL, user_data_store, user_stats_store
 from app.handler import (
     day_stress_handler,
     evening_action_handler,
@@ -49,11 +48,13 @@ async def send_morning_message(context: ContextTypes.DEFAULT_TYPE):
                     await context.bot.send_message(
                         chat_id=user_id,
                         text=base_text + praise_text,
-                        reply_markup=get_simple_keyboard({
-                            "😊 Нормально": "morning_normal",
-                            "🥱 Разбит(а)": "morning_broken",
-                            "😐 Пока непонятно": "morning_unknown",
-                        }),
+                        reply_markup=get_simple_keyboard(
+                            {
+                                "😊 Нормально": "morning_normal",
+                                "🥱 Разбит(а)": "morning_broken",
+                                "😐 Пока непонятно": "morning_unknown",
+                            }
+                        ),
                     )
                 elif morning_skip_streak >= 3:
                     soft_text = (
@@ -64,21 +65,25 @@ async def send_morning_message(context: ContextTypes.DEFAULT_TYPE):
                     await context.bot.send_message(
                         chat_id=user_id,
                         text=base_text + soft_text,
-                        reply_markup=get_simple_keyboard({
-                            "😊 Нормально": "morning_normal",
-                            "🥱 Разбит(а)": "morning_broken",
-                            "😐 Пока непонятно": "morning_unknown",
-                        }),
+                        reply_markup=get_simple_keyboard(
+                            {
+                                "😊 Нормально": "morning_normal",
+                                "🥱 Разбит(а)": "morning_broken",
+                                "😐 Пока непонятно": "morning_unknown",
+                            }
+                        ),
                     )
                 else:
                     await context.bot.send_message(
                         chat_id=user_id,
                         text=base_text,
-                        reply_markup=get_simple_keyboard({
-                            "😊 Нормально": "morning_normal",
-                            "🥱 Разбит(а)": "morning_broken",
-                            "😐 Пока непонятно": "morning_unknown",
-                        }),
+                        reply_markup=get_simple_keyboard(
+                            {
+                                "😊 Нормально": "morning_normal",
+                                "🥱 Разбит(а)": "morning_broken",
+                                "😐 Пока непонятно": "morning_unknown",
+                            }
+                        ),
                     )
             except Exception as e:
                 logger.error(f"Не удалось отправить утреннее сообщение пользователю {user_id}: {e}")
@@ -107,10 +112,12 @@ async def send_evening_message(context: ContextTypes.DEFAULT_TYPE):
                     await context.bot.send_message(
                         chat_id=user_id,
                         text=text,
-                        reply_markup=get_simple_keyboard({
-                            "Ок, попробую": "evening_do",
-                            "Пока рано, оставим как было": "evening_not_now",
-                        }),
+                        reply_markup=get_simple_keyboard(
+                            {
+                                "Ок, попробую": "evening_do",
+                                "Пока рано, оставим как было": "evening_not_now",
+                            }
+                        ),
                     )
                 elif evening_skip_streak >= 3:
                     text = (
@@ -122,19 +129,23 @@ async def send_evening_message(context: ContextTypes.DEFAULT_TYPE):
                     await context.bot.send_message(
                         chat_id=user_id,
                         text=text,
-                        reply_markup=get_simple_keyboard({
-                            "Ок, так проще": "evening_do",
-                            "Не хочу сейчас этим заниматься": "evening_not_now",
-                        }),
+                        reply_markup=get_simple_keyboard(
+                            {
+                                "Ок, так проще": "evening_do",
+                                "Не хочу сейчас этим заниматься": "evening_not_now",
+                            }
+                        ),
                     )
                 else:
                     await context.bot.send_message(
                         chat_id=user_id,
                         text=base_text,
-                        reply_markup=get_simple_keyboard({
-                            "Сделаю сегодня": "evening_do",
-                            "Не сейчас": "evening_not_now",
-                        }),
+                        reply_markup=get_simple_keyboard(
+                            {
+                                "Сделаю сегодня": "evening_do",
+                                "Не сейчас": "evening_not_now",
+                            }
+                        ),
                     )
             except Exception as e:
                 logger.error(f"Не удалось отправить вечернее сообщение пользователю {user_id}: {e}")
@@ -161,10 +172,12 @@ async def send_day_stress_message(context: ContextTypes.DEFAULT_TYPE):
                 await context.bot.send_message(
                     chat_id=user_id,
                     text=text,
-                    reply_markup=get_simple_keyboard({
-                        "✅ Сделал(а)": "day_stress_done",
-                        "Не до этого": "day_stress_skip",
-                    }),
+                    reply_markup=get_simple_keyboard(
+                        {
+                            "✅ Сделал(а)": "day_stress_done",
+                            "Не до этого": "day_stress_skip",
+                        }
+                    ),
                 )
             except Exception as e:
                 logger.error(f"Не удалось отправить дневное сообщение пользователю {user_id}: {e}")
@@ -217,20 +230,15 @@ def setup_handlers():
 # Вызываем настройку обработчиков
 setup_handlers()
 
+
 # --- НАСТРОЙКА FASTAPI ДЛЯ WEBHOOK ---
-WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://YourLifePilot.onrender.com")
-
-
 @app.on_event("startup")
 async def on_startup():
     """Устанавливаем вебхук при запуске"""
     webhook_info = await bot_app.bot.get_webhook_info()
     logger.info(f"Current webhook: {webhook_info.url}")
 
-    await bot_app.bot.set_webhook(
-        url=f"{WEBHOOK_URL}/webhook",
-        allowed_updates=Update.ALL_TYPES
-    )
+    await bot_app.bot.set_webhook(url=f"{WEBHOOK_URL}/webhook", allowed_updates=Update.ALL_TYPES)
     logger.info(f"Webhook set to {WEBHOOK_URL}/webhook")
 
 
@@ -281,4 +289,5 @@ async def trigger_day_webhook():
 # Для локального тестирования (не будет вызываться на Render)
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)
