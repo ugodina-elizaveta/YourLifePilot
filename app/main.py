@@ -1,6 +1,7 @@
 import logging
 import os
 import sys
+from datetime import datetime
 
 from fastapi import FastAPI, Request
 from telegram import Update
@@ -27,8 +28,17 @@ logger = logging.getLogger(__name__)
 # Создаем FastAPI приложение
 app = FastAPI()
 
+# Проверка токена
+if not BOT_TOKEN:
+    logger.error("❌ BOT_TOKEN not configured!")
+    sys.exit(1)
+
+# Создаем экземпляр бота
 bot_app = Application.builder().token(BOT_TOKEN).build()
 logger.info("✅ Bot application created")
+
+# Для отслеживания активности (чтобы видеть, что бот работает)
+last_activity = datetime.now()
 
 
 # --- Функции для планировщика ---
@@ -236,18 +246,20 @@ def setup_handlers():
 setup_handlers()
 
 # --- НАСТРОЙКА FASTAPI ДЛЯ WEBHOOK ---
-RENDER_URL = os.getenv("RENDER_EXTERNAL_URL")
+# Для Koyeb используем переменную KOYEB_APP_DOMAIN (она создается автоматически)
+KOYEB_URL = os.getenv("KOYEB_APP_DOMAIN")
 MANUAL_URL = os.getenv("WEBHOOK_URL")
 
-if RENDER_URL:
-    BASE_URL = RENDER_URL
-    logger.info(f"✅ Using RENDER_EXTERNAL_URL: {BASE_URL}")
+if KOYEB_URL:
+    # На Koyeb URL приходит без протокола, добавляем https://
+    BASE_URL = f"https://{KOYEB_URL}" if not KOYEB_URL.startswith('http') else KOYEB_URL
+    logger.info(f"✅ Using KOYEB URL: {BASE_URL}")
 elif MANUAL_URL:
     BASE_URL = MANUAL_URL
     logger.info(f"✅ Using manual WEBHOOK_URL: {BASE_URL}")
 else:
     BASE_URL = None
-    logger.error("❌ No webhook URL configured!")
+    logger.warning("⚠️ No webhook URL configured - will use localhost for testing")
 
 WEBHOOK_PATH = "/webhook"
 FULL_WEBHOOK_URL = f"{BASE_URL.rstrip('/')}{WEBHOOK_PATH}" if BASE_URL else None
@@ -256,6 +268,9 @@ FULL_WEBHOOK_URL = f"{BASE_URL.rstrip('/')}{WEBHOOK_PATH}" if BASE_URL else None
 @app.on_event("startup")
 async def on_startup():
     """Инициализация бота и установка вебхука"""
+    global last_activity
+    last_activity = datetime.now()
+
     logger.info("🚀 Starting application...")
 
     try:
@@ -287,6 +302,9 @@ async def on_startup():
 @app.post(WEBHOOK_PATH)
 async def webhook(request: Request):
     """Обработка входящих обновлений от Telegram"""
+    global last_activity
+    last_activity = datetime.now()
+
     try:
         # Получаем данные от Telegram
         update_data = await request.json()
@@ -328,15 +346,21 @@ async def root():
     return {
         "name": "YourLifePilot Bot",
         "status": "running",
+        "platform": "Koyeb",
         "webhook": FULL_WEBHOOK_URL,
         "users_count": len(user_data_store),
+        "last_activity": last_activity.isoformat(),
     }
 
 
 @app.get("/health")
 async def health():
-    """Проверка здоровья для Render"""
-    return {"status": "healthy", "bot_initialized": bot_app._initialized if hasattr(bot_app, '_initialized') else False}
+    """Проверка здоровья"""
+    return {
+        "status": "healthy",
+        "bot_initialized": bot_app._initialized if hasattr(bot_app, '_initialized') else False,
+        "last_activity": last_activity.isoformat(),
+    }
 
 
 # Эндпоинты для внешних cron-сервисов
@@ -389,3 +413,11 @@ async def trigger_day_webhook():
     except Exception as e:
         logger.error(f"Error in trigger-day: {e}")
         return {"ok": False, "error": str(e)}
+
+
+# Для локального запуска
+if __name__ == "__main__":
+    import uvicorn
+
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
