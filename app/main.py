@@ -1,11 +1,13 @@
 import logging
+import os
+import sys
 
 from fastapi import FastAPI, Request
 from telegram import Update
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, ConversationHandler
 
 from app.anketa import cancel, q1_handler, q2_handler, q3_handler, q4_handler, q5_handler
-from app.config import AGREEMENT, BOT_TOKEN, Q1, Q2, Q3, Q4, Q5, WEBHOOK_URL, user_data_store, user_stats_store
+from app.config import AGREEMENT, BOT_TOKEN, Q1, Q2, Q3, Q4, Q5, user_data_store, user_stats_store
 from app.handler import (
     day_stress_handler,
     evening_action_handler,
@@ -16,19 +18,20 @@ from app.handler import (
 from app.menu import get_simple_keyboard
 from app.start import agreement_handler, start
 
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', stream=sys.stdout
+)
+logger = logging.getLogger(__name__)
+
 # Создаем FastAPI приложение
 app = FastAPI()
 
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Создаем экземпляр бота
 bot_app = Application.builder().token(BOT_TOKEN).build()
+logger.info("✅ Bot application created")
 
 
 # --- Функции для планировщика ---
-# На Render.com эти функции НЕ БУДУТ вызываться автоматически!
-# Мы их оставляем, но они будут срабатывать только когда бот получит команду /trigger
 async def send_morning_message(context: ContextTypes.DEFAULT_TYPE):
     """Отправляет утреннее сообщение всем пользователям, прошедшим онбординг."""
     for user_id, data in user_data_store.items():
@@ -226,68 +229,163 @@ def setup_handlers():
     bot_app.add_handler(CommandHandler("trigger_evening", trigger_evening))
     bot_app.add_handler(CommandHandler("trigger_day", trigger_day))
 
+    logger.info("✅ Handlers configured")
+
 
 # Вызываем настройку обработчиков
 setup_handlers()
 
-
 # --- НАСТРОЙКА FASTAPI ДЛЯ WEBHOOK ---
+RENDER_URL = os.getenv("RENDER_EXTERNAL_URL")
+MANUAL_URL = os.getenv("WEBHOOK_URL")
+
+if RENDER_URL:
+    BASE_URL = RENDER_URL
+    logger.info(f"✅ Using RENDER_EXTERNAL_URL: {BASE_URL}")
+elif MANUAL_URL:
+    BASE_URL = MANUAL_URL
+    logger.info(f"✅ Using manual WEBHOOK_URL: {BASE_URL}")
+else:
+    BASE_URL = None
+    logger.error("❌ No webhook URL configured!")
+
+WEBHOOK_PATH = "/webhook"
+FULL_WEBHOOK_URL = f"{BASE_URL.rstrip('/')}{WEBHOOK_PATH}" if BASE_URL else None
+
+
 @app.on_event("startup")
 async def on_startup():
-    """Устанавливаем вебхук при запуске"""
-    webhook_info = await bot_app.bot.get_webhook_info()
-    logger.info(f"Current webhook: {webhook_info.url}")
+    """Инициализация бота и установка вебхука"""
+    logger.info("🚀 Starting application...")
 
-    await bot_app.bot.set_webhook(url=f"{WEBHOOK_URL}/webhook", allowed_updates=Update.ALL_TYPES)
-    logger.info(f"Webhook set to {WEBHOOK_URL}/webhook")
+    try:
+        # 1. Инициализируем бота
+        await bot_app.initialize()
+        logger.info("✅ Bot initialized")
+
+        # 2. Устанавливаем вебхук
+        if FULL_WEBHOOK_URL:
+            webhook_info = await bot_app.bot.get_webhook_info()
+            logger.info(f"Current webhook: {webhook_info.url}")
+
+            result = await bot_app.bot.set_webhook(
+                url=FULL_WEBHOOK_URL, allowed_updates=Update.ALL_TYPES, drop_pending_updates=True
+            )
+
+            if result:
+                logger.info(f"✅ Webhook set to {FULL_WEBHOOK_URL}")
+            else:
+                logger.error("❌ Failed to set webhook")
+        else:
+            logger.warning("⚠️ No webhook URL configured - bot will not receive updates")
+
+    except Exception as e:
+        logger.error(f"❌ Startup error: {e}")
+        raise
 
 
-@app.post("/webhook")
+@app.post(WEBHOOK_PATH)
 async def webhook(request: Request):
-    """Принимаем обновления от Telegram"""
-    update_data = await request.json()
-    update = Update.de_json(update_data, bot_app.bot)
-    await bot_app.process_update(update)
-    return {"ok": True}
+    """Обработка входящих обновлений от Telegram"""
+    try:
+        # Получаем данные от Telegram
+        update_data = await request.json()
+        logger.debug(f"Received update: {update_data.get('update_id')}")
+
+        # Создаем объект Update
+        update = Update.de_json(update_data, bot_app.bot)
+
+        # Обрабатываем обновление
+        await bot_app.process_update(update)
+
+        return {"ok": True}
+
+    except Exception as e:
+        logger.error(f"Error processing update: {e}", exc_info=True)
+        return {"ok": False, "error": str(e)}
 
 
 @app.on_event("shutdown")
 async def on_shutdown():
-    """Удаляем вебхук при остановке"""
-    await bot_app.bot.delete_webhook()
-    logger.info("Webhook deleted")
+    """Остановка бота"""
+    logger.info("Shutting down...")
+    try:
+        # Удаляем вебхук
+        await bot_app.bot.delete_webhook()
+        logger.info("✅ Webhook deleted")
+
+        # Останавливаем бота
+        await bot_app.shutdown()
+        logger.info("✅ Bot shut down")
+
+    except Exception as e:
+        logger.error(f"Shutdown error: {e}")
+
+
+# Эндпоинты для проверки статуса
+@app.get("/")
+async def root():
+    return {
+        "name": "YourLifePilot Bot",
+        "status": "running",
+        "webhook": FULL_WEBHOOK_URL,
+        "users_count": len(user_data_store),
+    }
 
 
 @app.get("/health")
 async def health():
-    """Проверка здоровья"""
-    return {"status": "ok"}
+    """Проверка здоровья для Render"""
+    return {"status": "healthy", "bot_initialized": bot_app._initialized if hasattr(bot_app, '_initialized') else False}
 
 
+# Эндпоинты для внешних cron-сервисов
 @app.get("/trigger-morning")
 async def trigger_morning_webhook():
-    """Вызывается внешним cron-сервисом"""
-    async with bot_app:
-        await send_morning_message(None)
-    return {"ok": True}
+    """Вызывается внешним cron-сервисом для утренней рассылки"""
+    try:
+
+        class DummyContext:
+            def __init__(self, bot):
+                self.bot = bot
+
+        dummy_context = DummyContext(bot_app.bot)
+        await send_morning_message(dummy_context)
+        return {"ok": True, "message": "Morning messages sent"}
+    except Exception as e:
+        logger.error(f"Error in trigger-morning: {e}")
+        return {"ok": False, "error": str(e)}
 
 
 @app.get("/trigger-evening")
 async def trigger_evening_webhook():
-    async with bot_app:
-        await send_evening_message(None)
-    return {"ok": True}
+    """Вызывается внешним cron-сервисом для вечерней рассылки"""
+    try:
+
+        class DummyContext:
+            def __init__(self, bot):
+                self.bot = bot
+
+        dummy_context = DummyContext(bot_app.bot)
+        await send_evening_message(dummy_context)
+        return {"ok": True, "message": "Evening messages sent"}
+    except Exception as e:
+        logger.error(f"Error in trigger-evening: {e}")
+        return {"ok": False, "error": str(e)}
 
 
 @app.get("/trigger-day")
 async def trigger_day_webhook():
-    async with bot_app:
-        await send_day_stress_message(None)
-    return {"ok": True}
+    """Вызывается внешним cron-сервисом для дневной рассылки"""
+    try:
 
+        class DummyContext:
+            def __init__(self, bot):
+                self.bot = bot
 
-# Для локального тестирования (не будет вызываться на Render)
-if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+        dummy_context = DummyContext(bot_app.bot)
+        await send_day_stress_message(dummy_context)
+        return {"ok": True, "message": "Day messages sent"}
+    except Exception as e:
+        logger.error(f"Error in trigger-day: {e}")
+        return {"ok": False, "error": str(e)}
