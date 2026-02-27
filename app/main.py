@@ -37,7 +37,7 @@ if not BOT_TOKEN:
 bot_app = Application.builder().token(BOT_TOKEN).build()
 logger.info("✅ Bot application created")
 
-# Для отслеживания активности (чтобы видеть, что бот работает)
+# Для отслеживания активности
 last_activity = datetime.now()
 
 
@@ -246,20 +246,27 @@ def setup_handlers():
 setup_handlers()
 
 # --- НАСТРОЙКА FASTAPI ДЛЯ WEBHOOK ---
-# Для Koyeb используем переменную KOYEB_APP_DOMAIN (она создается автоматически)
-KOYEB_URL = os.getenv("KOYEB_APP_DOMAIN")
+# Для Fly.io используем переменную FLY_APP_NAME
+FLY_APP_NAME = os.getenv("FLY_APP_NAME")
 MANUAL_URL = os.getenv("WEBHOOK_URL")
 
-if KOYEB_URL:
-    # На Koyeb URL приходит без протокола, добавляем https://
-    BASE_URL = f"https://{KOYEB_URL}" if not KOYEB_URL.startswith('http') else KOYEB_URL
-    logger.info(f"✅ Using KOYEB URL: {BASE_URL}")
+if FLY_APP_NAME:
+    # На Fly.io URL формируется как app-name.fly.dev
+    BASE_URL = f"https://{FLY_APP_NAME}.fly.dev"
+    logger.info(f"✅ Using Fly.io URL: {BASE_URL}")
 elif MANUAL_URL:
     BASE_URL = MANUAL_URL
     logger.info(f"✅ Using manual WEBHOOK_URL: {BASE_URL}")
 else:
-    BASE_URL = None
-    logger.warning("⚠️ No webhook URL configured - will use localhost for testing")
+    # Пробуем получить из переменной окружения (на случай локального теста)
+    BASE_URL = os.getenv("RENDER_EXTERNAL_URL") or os.getenv("KOYEB_APP_DOMAIN")
+    if BASE_URL:
+        if not BASE_URL.startswith('http'):
+            BASE_URL = f"https://{BASE_URL}"
+        logger.info(f"✅ Using fallback URL: {BASE_URL}")
+    else:
+        BASE_URL = None
+        logger.warning("⚠️ No webhook URL configured - will use localhost for testing")
 
 WEBHOOK_PATH = "/webhook"
 FULL_WEBHOOK_URL = f"{BASE_URL.rstrip('/')}{WEBHOOK_PATH}" if BASE_URL else None
@@ -346,7 +353,7 @@ async def root():
     return {
         "name": "YourLifePilot Bot",
         "status": "running",
-        "platform": "Koyeb",
+        "platform": "Fly.io",
         "webhook": FULL_WEBHOOK_URL,
         "users_count": len(user_data_store),
         "last_activity": last_activity.isoformat(),
@@ -363,61 +370,9 @@ async def health():
     }
 
 
-# Эндпоинты для внешних cron-сервисов
-@app.get("/trigger-morning")
-async def trigger_morning_webhook():
-    """Вызывается внешним cron-сервисом для утренней рассылки"""
-    try:
-
-        class DummyContext:
-            def __init__(self, bot):
-                self.bot = bot
-
-        dummy_context = DummyContext(bot_app.bot)
-        await send_morning_message(dummy_context)
-        return {"ok": True, "message": "Morning messages sent"}
-    except Exception as e:
-        logger.error(f"Error in trigger-morning: {e}")
-        return {"ok": False, "error": str(e)}
-
-
-@app.get("/trigger-evening")
-async def trigger_evening_webhook():
-    """Вызывается внешним cron-сервисом для вечерней рассылки"""
-    try:
-
-        class DummyContext:
-            def __init__(self, bot):
-                self.bot = bot
-
-        dummy_context = DummyContext(bot_app.bot)
-        await send_evening_message(dummy_context)
-        return {"ok": True, "message": "Evening messages sent"}
-    except Exception as e:
-        logger.error(f"Error in trigger-evening: {e}")
-        return {"ok": False, "error": str(e)}
-
-
-@app.get("/trigger-day")
-async def trigger_day_webhook():
-    """Вызывается внешним cron-сервисом для дневной рассылки"""
-    try:
-
-        class DummyContext:
-            def __init__(self, bot):
-                self.bot = bot
-
-        dummy_context = DummyContext(bot_app.bot)
-        await send_day_stress_message(dummy_context)
-        return {"ok": True, "message": "Day messages sent"}
-    except Exception as e:
-        logger.error(f"Error in trigger-day: {e}")
-        return {"ok": False, "error": str(e)}
-
-
 # Для локального запуска
 if __name__ == "__main__":
     import uvicorn
 
-    port = int(os.getenv("PORT", 8000))
+    port = int(os.getenv("PORT", 8080))
     uvicorn.run(app, host="0.0.0.0", port=port)
