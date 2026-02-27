@@ -246,30 +246,21 @@ def setup_handlers():
 setup_handlers()
 
 # --- НАСТРОЙКА FASTAPI ДЛЯ WEBHOOK ---
-# Для Fly.io используем переменную FLY_APP_NAME
-FLY_APP_NAME = os.getenv("FLY_APP_NAME")
+# Упрощаем для своего сервера
+SERVER_IP = "185.185.142.217"  # Ваш IP адрес
+SERVER_PORT = os.getenv("PORT", "8000")
 MANUAL_URL = os.getenv("WEBHOOK_URL")
 
-if FLY_APP_NAME:
-    # На Fly.io URL формируется как app-name.fly.dev
-    BASE_URL = f"https://{FLY_APP_NAME}.fly.dev"
-    logger.info(f"✅ Using Fly.io URL: {BASE_URL}")
-elif MANUAL_URL:
+if MANUAL_URL:
     BASE_URL = MANUAL_URL
     logger.info(f"✅ Using manual WEBHOOK_URL: {BASE_URL}")
 else:
-    # Пробуем получить из переменной окружения (на случай локального теста)
-    BASE_URL = os.getenv("RENDER_EXTERNAL_URL") or os.getenv("KOYEB_APP_DOMAIN")
-    if BASE_URL:
-        if not BASE_URL.startswith('http'):
-            BASE_URL = f"https://{BASE_URL}"
-        logger.info(f"✅ Using fallback URL: {BASE_URL}")
-    else:
-        BASE_URL = None
-        logger.warning("⚠️ No webhook URL configured - will use localhost for testing")
+    # Формируем URL из IP и порта
+    BASE_URL = f"http://{SERVER_IP}:{SERVER_PORT}"
+    logger.info(f"✅ Using server IP: {BASE_URL}")
 
 WEBHOOK_PATH = "/webhook"
-FULL_WEBHOOK_URL = f"{BASE_URL.rstrip('/')}{WEBHOOK_PATH}" if BASE_URL else None
+FULL_WEBHOOK_URL = f"{BASE_URL.rstrip('/')}{WEBHOOK_PATH}"
 
 
 @app.on_event("startup")
@@ -353,7 +344,8 @@ async def root():
     return {
         "name": "YourLifePilot Bot",
         "status": "running",
-        "platform": "Fly.io",
+        "platform": "Self-hosted",
+        "server_ip": "185.185.142.217",
         "webhook": FULL_WEBHOOK_URL,
         "users_count": len(user_data_store),
         "last_activity": last_activity.isoformat(),
@@ -370,9 +362,58 @@ async def health():
     }
 
 
+# Эндпоинты для тестовых рассылок
+@app.get("/trigger-morning")
+async def trigger_morning_webhook():
+    """Для тестового запуска утренней рассылки"""
+    try:
+        class DummyContext:
+            def __init__(self, bot):
+                self.bot = bot
+
+        dummy_context = DummyContext(bot_app.bot)
+        await send_morning_message(dummy_context)
+        return {"ok": True, "message": "Morning messages sent"}
+    except Exception as e:
+        logger.error(f"Error in trigger-morning: {e}")
+        return {"ok": False, "error": str(e)}
+
+
+@app.get("/trigger-evening")
+async def trigger_evening_webhook():
+    """Для тестового запуска вечерней рассылки"""
+    try:
+        class DummyContext:
+            def __init__(self, bot):
+                self.bot = bot
+
+        dummy_context = DummyContext(bot_app.bot)
+        await send_evening_message(dummy_context)
+        return {"ok": True, "message": "Evening messages sent"}
+    except Exception as e:
+        logger.error(f"Error in trigger-evening: {e}")
+        return {"ok": False, "error": str(e)}
+
+
+@app.get("/trigger-day")
+async def trigger_day_webhook():
+    """Для тестового запуска дневной рассылки"""
+    try:
+        class DummyContext:
+            def __init__(self, bot):
+                self.bot = bot
+
+        dummy_context = DummyContext(bot_app.bot)
+        await send_day_stress_message(dummy_context)
+        return {"ok": True, "message": "Day messages sent"}
+    except Exception as e:
+        logger.error(f"Error in trigger-day: {e}")
+        return {"ok": False, "error": str(e)}
+
+
 # Для локального запуска
 if __name__ == "__main__":
     import uvicorn
 
-    port = int(os.getenv("PORT", 8080))
+    port = int(os.getenv("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
