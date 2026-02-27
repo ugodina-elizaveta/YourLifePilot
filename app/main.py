@@ -246,8 +246,7 @@ def setup_handlers():
 setup_handlers()
 
 # --- НАСТРОЙКА FASTAPI ДЛЯ WEBHOOK ---
-# Упрощаем для своего сервера
-SERVER_IP = "185.185.142.217"  # Ваш IP адрес
+SERVER_IP = "185.185.142.217"
 SERVER_PORT = os.getenv("PORT", "8000")
 MANUAL_URL = os.getenv("WEBHOOK_URL")
 
@@ -255,9 +254,9 @@ if MANUAL_URL:
     BASE_URL = MANUAL_URL
     logger.info(f"✅ Using manual WEBHOOK_URL: {BASE_URL}")
 else:
-    # Формируем URL из IP и порта
-    BASE_URL = f"http://{SERVER_IP}:{SERVER_PORT}"
-    logger.info(f"✅ Using server IP: {BASE_URL}")
+    # Используем HTTPS через nginx
+    BASE_URL = f"https://{SERVER_IP}"
+    logger.info(f"✅ Using server IP with HTTPS: {BASE_URL}")
 
 WEBHOOK_PATH = "/webhook"
 FULL_WEBHOOK_URL = f"{BASE_URL.rstrip('/')}{WEBHOOK_PATH}"
