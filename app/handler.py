@@ -23,17 +23,17 @@ async def morning_action_handler(update: Update, context: ContextTypes.DEFAULT_T
     user_id = str(query.from_user.id)
     data = query.data
 
+    text = None
+
     if data == "morning_normal":
         text = "Рад слышать! Хорошего дня."
-        # Сбрасываем или обновляем статистику
         user_stats_store[user_id]['morning_skip_streak'] = 0
+
     elif data == "morning_broken":
-        text = "Жаль. Давай попробуем маленький шаг для бодрости:\n"
-        text += "Попробуй сейчас просто встать, подойти к окну и сделать 5 глубоких вдохов. Это займёт меньше минуты."
-        # Если в сценарии есть "просыпаюсь разбитым", добавляем кнопки микро-задачи
         if 'просыпаюсь разбитым' in user_data_store.get(user_id, {}).get('scenario', []):
             await query.edit_message_text(
-                text,
+                "Жаль. Давай попробуем маленький шаг для бодрости:\n"
+                "Попробуй сейчас просто встать, подойти к окну и сделать 5 глубоких вдохов. Это займёт меньше минуты.",
                 reply_markup=get_simple_keyboard(
                     {
                         "✅ Сделал(а)": "morning_micro_done",
@@ -42,10 +42,17 @@ async def morning_action_handler(update: Update, context: ContextTypes.DEFAULT_T
                 ),
             )
             return
+        else:
+            text = "Жаль. Если хочешь, можешь сделать пару глубоких вдохов, чтобы взбодриться."
+
     elif data == "morning_unknown":
         text = "Хорошо, понаблюдай за собой. Если будет нужна поддержка, я рядом."
 
-    await query.edit_message_text(text)
+    if text is not None:
+        await query.edit_message_text(text)
+    else:
+        logger.error(f"Необработанный callback data: {data} для пользователя {user_id}")
+        await query.edit_message_text("Что-то пошло не так. Попробуй еще раз.")
 
 
 async def morning_micro_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -54,23 +61,19 @@ async def morning_micro_handler(update: Update, context: ContextTypes.DEFAULT_TY
     await query.answer()
     user_id = str(query.from_user.id)
     data = query.data
-
     today = datetime.now().date()
 
     if data == "morning_micro_done":
         await query.edit_message_text("Отлично! Маленький шаг сделан. Так держать!")
-        # Увеличиваем streak
         user_stats_store[user_id]['morning_streak'] = user_stats_store[user_id].get('morning_streak', 0) + 1
         user_stats_store[user_id]['morning_skip_streak'] = 0
         user_stats_store[user_id]['last_action_date']['morning'] = today
+
     elif data == "morning_micro_later":
         await query.edit_message_text("Хорошо, можешь вернуться к этому позже. Я напомню завтра.")
         user_stats_store[user_id]['morning_skip_streak'] = user_stats_store[user_id].get('morning_skip_streak', 0) + 1
         user_stats_store[user_id]['morning_streak'] = 0
         user_stats_store[user_id]['last_action_date']['morning'] = today
-
-    # Проверяем условия для похвалы или упрощения (логика будет в планировщике при отправке)
-    # Но можно и здесь давать обратную связь
 
 
 async def evening_action_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -81,31 +84,38 @@ async def evening_action_handler(update: Update, context: ContextTypes.DEFAULT_T
     data = query.data
     today = datetime.now().date()
 
+    text = None
+
     if data == "evening_do":
         text = "Отлично! Маленький шаг запланирован."
         user_stats_store[user_id]['evening_streak'] = user_stats_store[user_id].get('evening_streak', 0) + 1
         user_stats_store[user_id]['evening_skip_streak'] = 0
         user_stats_store[user_id]['last_action_date']['evening'] = today
+
     elif data == "evening_not_now":
         text = "Хорошо, в другой раз. Главное — быть в контакте с собой."
         user_stats_store[user_id]['evening_skip_streak'] = user_stats_store[user_id].get('evening_skip_streak', 0) + 1
         user_stats_store[user_id]['evening_streak'] = 0
         user_stats_store[user_id]['last_action_date']['evening'] = today
 
-    await query.edit_message_text(text)
+    if text is not None:
+        await query.edit_message_text(text)
 
-    # Затем отправляем вопрос про самочувствие
-    await query.message.reply_text(
-        "И напоследок: как ты сейчас себя чувствуешь?",
-        reply_markup=get_simple_keyboard(
-            {
-                "🙂 Спокойно": "feeling_calm",
-                "😕 Напряжён(а)": "feeling_stressed",
-                "😔 Грустно": "feeling_sad",
-                "😩 Очень плохо": "feeling_bad",
-            }
-        ),
-    )
+        # Затем отправляем вопрос про самочувствие
+        await query.message.reply_text(
+            "И напоследок: как ты сейчас себя чувствуешь?",
+            reply_markup=get_simple_keyboard(
+                {
+                    "🙂 Спокойно": "feeling_calm",
+                    "😕 Напряжён(а)": "feeling_stressed",
+                    "😔 Грустно": "feeling_sad",
+                    "😩 Очень плохо": "feeling_bad",
+                }
+            ),
+        )
+    else:
+        logger.error(f"Необработанный callback data: {data} для пользователя {user_id}")
+        await query.edit_message_text("Что-то пошло не так. Попробуй еще раз.")
 
 
 async def feeling_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -123,9 +133,13 @@ async def feeling_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
 
     feeling = feeling_map.get(data, "Неизвестно")
-    # Сохраняем в историю (для аналитики)
+
+    if user_id not in user_data_store:
+        user_data_store[user_id] = {}
+
     if 'mood_history' not in user_data_store[user_id]:
         user_data_store[user_id]['mood_history'] = []
+
     user_data_store[user_id]['mood_history'].append({'date': datetime.now().isoformat(), 'feeling': feeling})
 
     await query.edit_message_text(f"Спасибо, что поделился(лась). Записал: {feeling}")
@@ -139,11 +153,14 @@ async def day_stress_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     data = query.data
     today = datetime.now().date()
 
+    text = None
+
     if data == "day_stress_done":
         text = "Отлично! Микро-пауза помогает перезагрузиться."
         user_stats_store[user_id]['day_stress_streak'] = user_stats_store[user_id].get('day_stress_streak', 0) + 1
         user_stats_store[user_id]['day_stress_skip_streak'] = 0
         user_stats_store[user_id]['last_action_date']['day_stress'] = today
+
     elif data == "day_stress_skip":
         text = "Понимаю. Если будет возможность, просто подыши глубоко пару раз."
         user_stats_store[user_id]['day_stress_skip_streak'] = (
@@ -152,7 +169,11 @@ async def day_stress_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         user_stats_store[user_id]['day_stress_streak'] = 0
         user_stats_store[user_id]['last_action_date']['day_stress'] = today
 
-    await query.edit_message_text(text)
+    if text is not None:
+        await query.edit_message_text(text)
+    else:
+        logger.error(f"Необработанный callback data: {data} для пользователя {user_id}")
+        await query.edit_message_text("Что-то пошло не так. Попробуй еще раз.")
 
 
 # --- НАСТРОЙКА ОБРАБОТЧИКОВ ---
