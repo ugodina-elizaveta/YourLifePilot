@@ -1,8 +1,11 @@
+import asyncio
+import datetime
 import logging
 import sys
 
 from telegram.ext import ContextTypes
 
+from app.bot_app import bot_app
 from app.config import user_data_store, user_stats_store
 from app.menu import get_simple_keyboard
 
@@ -166,3 +169,57 @@ async def send_day_stress_message(context: ContextTypes.DEFAULT_TYPE):
                 )
             except Exception as e:
                 logger.error(f"Не удалось отправить дневное сообщение пользователю {user_id}: {e}")
+
+
+# --- ПЛАНИРОВЩИК ЗАДАЧ ---
+async def run_scheduler():
+    """Планировщик для периодических рассылок"""
+    logger.info("🕐 Планировщик запущен")
+
+    while True:
+        try:
+            now = datetime.now()
+            current_time = now.time()
+
+            # Утренняя рассылка в 9:00
+            if current_time.hour == 9 and current_time.minute == 0 and current_time.second < 10:
+                logger.info("⏰ Запуск утренней рассылки по расписанию")
+
+                class DummyContext:
+                    def __init__(self, bot):
+                        self.bot = bot
+
+                dummy_context = DummyContext(bot_app.bot)
+                await send_morning_message(dummy_context)
+                await asyncio.sleep(60)  # Пропускаем минуту
+
+            # Дневная рассылка в 15:00
+            elif current_time.hour == 15 and current_time.minute == 0 and current_time.second < 10:
+                logger.info("⏰ Запуск дневной рассылки по расписанию")
+
+                class DummyContext:
+                    def __init__(self, bot):
+                        self.bot = bot
+
+                dummy_context = DummyContext(bot_app.bot)
+                await send_day_stress_message(dummy_context)
+                await asyncio.sleep(60)
+
+            # Вечерняя рассылка в 21:00
+            elif current_time.hour == 21 and current_time.minute == 0 and current_time.second < 10:
+                logger.info("⏰ Запуск вечерней рассылки по расписанию")
+
+                class DummyContext:
+                    def __init__(self, bot):
+                        self.bot = bot
+
+                dummy_context = DummyContext(bot_app.bot)
+                await send_evening_message(dummy_context)
+                await asyncio.sleep(60)
+
+            # Проверка каждые 30 секунд
+            await asyncio.sleep(30)
+
+        except Exception as e:
+            logger.error(f"Ошибка в планировщике: {e}")
+            await asyncio.sleep(60)  # При ошибке ждем минуту

@@ -1,11 +1,15 @@
 import logging
 from datetime import datetime
 
+from bot_app import bot_app
 from telegram import Update
-from telegram.ext import ContextTypes
+from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes, ConversationHandler
 
-from app.config import user_data_store, user_stats_store
+from app.anketa import cancel, q1_handler, q2_handler, q3_handler, q4_handler, q5_handler
+from app.config import AGREEMENT, Q1, Q2, Q3, Q4, Q5, user_data_store, user_stats_store
 from app.menu import get_simple_keyboard
+from app.sheduler import send_day_stress_message, send_evening_message, send_morning_message
+from app.start import agreement_handler, start
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -149,3 +153,49 @@ async def day_stress_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         user_stats_store[user_id]['last_action_date']['day_stress'] = today
 
     await query.edit_message_text(text)
+
+
+# --- НАСТРОЙКА ОБРАБОТЧИКОВ ---
+def setup_handlers():
+    """Настраивает все обработчики для бота"""
+    # Обработчик диалога онбординга
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler('start', start)],
+        states={
+            AGREEMENT: [CallbackQueryHandler(agreement_handler, pattern="^agree$")],
+            Q1: [CallbackQueryHandler(q1_handler, pattern="^q1_")],
+            Q2: [CallbackQueryHandler(q2_handler, pattern="^q2_")],
+            Q3: [CallbackQueryHandler(q3_handler, pattern="^q3_")],
+            Q4: [CallbackQueryHandler(q4_handler, pattern="^q4_")],
+            Q5: [CallbackQueryHandler(q5_handler, pattern="^q5_")],
+        },
+        fallbacks=[CommandHandler('cancel', cancel)],
+    )
+
+    bot_app.add_handler(conv_handler)
+
+    # Обработчики колбэков
+    bot_app.add_handler(CallbackQueryHandler(morning_action_handler, pattern="^morning_"))
+    bot_app.add_handler(CallbackQueryHandler(morning_micro_handler, pattern="^morning_micro_"))
+    bot_app.add_handler(CallbackQueryHandler(evening_action_handler, pattern="^evening_"))
+    bot_app.add_handler(CallbackQueryHandler(day_stress_handler, pattern="^day_stress_"))
+    bot_app.add_handler(CallbackQueryHandler(feeling_handler, pattern="^feeling_"))
+
+    # Добавляем команду для тестовой отправки
+    async def trigger_morning(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await send_morning_message(context)
+        await update.message.reply_text("Утренние сообщения отправлены!")
+
+    async def trigger_evening(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await send_evening_message(context)
+        await update.message.reply_text("Вечерние сообщения отправлены!")
+
+    async def trigger_day(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await send_day_stress_message(context)
+        await update.message.reply_text("Дневные сообщения отправлены!")
+
+    bot_app.add_handler(CommandHandler("trigger_morning", trigger_morning))
+    bot_app.add_handler(CommandHandler("trigger_evening", trigger_evening))
+    bot_app.add_handler(CommandHandler("trigger_day", trigger_day))
+
+    logger.info("✅ Handlers configured")

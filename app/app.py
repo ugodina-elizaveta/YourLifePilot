@@ -6,10 +6,11 @@ from datetime import datetime
 
 from fastapi import FastAPI
 from telegram import Update
-from telegram.ext import Application
 
-from app.config import BOT_TOKEN, FULL_WEBHOOK_URL
-from app.main import setup_handlers, run_scheduler
+from app.bot_app import bot_app
+from app.config import FULL_WEBHOOK_URL
+from app.handler import setup_handlers
+from app.sheduler import run_scheduler
 
 # Настройка логирования
 logging.basicConfig(
@@ -17,15 +18,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Проверка токена
-if not BOT_TOKEN:
-    logger.error("❌ BOT_TOKEN not configured!")
-    sys.exit(1)
-
-# Создаем экземпляр бота
-bot_app = Application.builder().token(BOT_TOKEN).build()
 scheduler_tasks = []
-logger.info("✅ Bot application created")
 
 # Для отслеживания активности
 last_activity = datetime.now()

@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import os
 import sys
@@ -6,20 +5,10 @@ from datetime import datetime
 
 from fastapi import Request
 from telegram import Update
-from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes, ConversationHandler
 
-from app.anketa import cancel, q1_handler, q2_handler, q3_handler, q4_handler, q5_handler
 from app.app import app, bot_app
-from app.config import AGREEMENT, FULL_WEBHOOK_URL, Q1, Q2, Q3, Q4, Q5, WEBHOOK_PATH, user_data_store
-from app.handler import (
-    day_stress_handler,
-    evening_action_handler,
-    feeling_handler,
-    morning_action_handler,
-    morning_micro_handler,
-)
+from app.config import FULL_WEBHOOK_URL, WEBHOOK_PATH, user_data_store
 from app.sheduler import send_day_stress_message, send_evening_message, send_morning_message
-from app.start import agreement_handler, start
 
 # Настройка логирования
 logging.basicConfig(
@@ -27,106 +16,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 last_activity = datetime.now()
-
-
-# --- ПЛАНИРОВЩИК ЗАДАЧ ---
-async def run_scheduler():
-    """Планировщик для периодических рассылок"""
-    logger.info("🕐 Планировщик запущен")
-
-    while True:
-        try:
-            now = datetime.now()
-            current_time = now.time()
-
-            # Утренняя рассылка в 9:00
-            if current_time.hour == 9 and current_time.minute == 0 and current_time.second < 10:
-                logger.info("⏰ Запуск утренней рассылки по расписанию")
-
-                class DummyContext:
-                    def __init__(self, bot):
-                        self.bot = bot
-
-                dummy_context = DummyContext(bot_app.bot)
-                await send_morning_message(dummy_context)
-                await asyncio.sleep(60)  # Пропускаем минуту
-
-            # Дневная рассылка в 15:00
-            elif current_time.hour == 15 and current_time.minute == 0 and current_time.second < 10:
-                logger.info("⏰ Запуск дневной рассылки по расписанию")
-
-                class DummyContext:
-                    def __init__(self, bot):
-                        self.bot = bot
-
-                dummy_context = DummyContext(bot_app.bot)
-                await send_day_stress_message(dummy_context)
-                await asyncio.sleep(60)
-
-            # Вечерняя рассылка в 21:00
-            elif current_time.hour == 21 and current_time.minute == 0 and current_time.second < 10:
-                logger.info("⏰ Запуск вечерней рассылки по расписанию")
-
-                class DummyContext:
-                    def __init__(self, bot):
-                        self.bot = bot
-
-                dummy_context = DummyContext(bot_app.bot)
-                await send_evening_message(dummy_context)
-                await asyncio.sleep(60)
-
-            # Проверка каждые 30 секунд
-            await asyncio.sleep(30)
-
-        except Exception as e:
-            logger.error(f"Ошибка в планировщике: {e}")
-            await asyncio.sleep(60)  # При ошибке ждем минуту
-
-
-# --- НАСТРОЙКА ОБРАБОТЧИКОВ ---
-def setup_handlers():
-    """Настраивает все обработчики для бота"""
-    # Обработчик диалога онбординга
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', start)],
-        states={
-            AGREEMENT: [CallbackQueryHandler(agreement_handler, pattern="^agree$")],
-            Q1: [CallbackQueryHandler(q1_handler, pattern="^q1_")],
-            Q2: [CallbackQueryHandler(q2_handler, pattern="^q2_")],
-            Q3: [CallbackQueryHandler(q3_handler, pattern="^q3_")],
-            Q4: [CallbackQueryHandler(q4_handler, pattern="^q4_")],
-            Q5: [CallbackQueryHandler(q5_handler, pattern="^q5_")],
-        },
-        fallbacks=[CommandHandler('cancel', cancel)],
-    )
-
-    bot_app.add_handler(conv_handler)
-
-    # Обработчики колбэков
-    bot_app.add_handler(CallbackQueryHandler(morning_action_handler, pattern="^morning_"))
-    bot_app.add_handler(CallbackQueryHandler(morning_micro_handler, pattern="^morning_micro_"))
-    bot_app.add_handler(CallbackQueryHandler(evening_action_handler, pattern="^evening_"))
-    bot_app.add_handler(CallbackQueryHandler(day_stress_handler, pattern="^day_stress_"))
-    bot_app.add_handler(CallbackQueryHandler(feeling_handler, pattern="^feeling_"))
-
-    # Добавляем команду для тестовой отправки
-    async def trigger_morning(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await send_morning_message(context)
-        await update.message.reply_text("Утренние сообщения отправлены!")
-
-    async def trigger_evening(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await send_evening_message(context)
-        await update.message.reply_text("Вечерние сообщения отправлены!")
-
-    async def trigger_day(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await send_day_stress_message(context)
-        await update.message.reply_text("Дневные сообщения отправлены!")
-
-    bot_app.add_handler(CommandHandler("trigger_morning", trigger_morning))
-    bot_app.add_handler(CommandHandler("trigger_evening", trigger_evening))
-    bot_app.add_handler(CommandHandler("trigger_day", trigger_day))
-
-    logger.info("✅ Handlers configured")
 
 
 @app.post(WEBHOOK_PATH)
