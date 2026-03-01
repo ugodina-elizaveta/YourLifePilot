@@ -1,11 +1,11 @@
 import logging
 from datetime import datetime
 
-from bot_app import bot_app
 from telegram import Update
 from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes, ConversationHandler
 
 from app.anketa import cancel, q1_handler, q2_handler, q3_handler, q4_handler, q5_handler
+from app.bot_app import bot_app
 from app.config import AGREEMENT, Q1, Q2, Q3, Q4, Q5, user_data_store, user_stats_store
 from app.menu import get_simple_keyboard
 from app.sheduler import send_day_stress_message, send_evening_message, send_morning_message
