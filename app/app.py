@@ -46,8 +46,15 @@ async def lifespan(app: FastAPI):
             webhook_info = await bot_app.bot.get_webhook_info()
             logger.info(f"Текущий webhook: {webhook_info.url}")
 
+            with open('/etc/nginx/ssl/yourlifepilot.crt', 'rb') as f:
+                certificate = f.read()
+
             result = await bot_app.bot.set_webhook(
-                url=FULL_WEBHOOK_URL, allowed_updates=Update.ALL_TYPES, drop_pending_updates=True
+                url=FULL_WEBHOOK_URL,
+                certificate=certificate,  # Передаем сертификат как байты
+                allowed_updates=Update.ALL_TYPES,
+                drop_pending_updates=True,
+                max_connections=40
             )
 
             if result:
