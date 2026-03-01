@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from telegram import Update
 from telegram.ext import Application
 
-from app.config import BOT_TOKEN, MANUAL_URL, SERVER_IP
+from app.config import BOT_TOKEN, FULL_WEBHOOK_URL
 from app.main import setup_handlers, run_scheduler
 
 # Настройка логирования
@@ -32,17 +32,6 @@ last_activity = datetime.now()
 
 # Вызываем настройку обработчиков
 setup_handlers()
-
-if MANUAL_URL:
-    BASE_URL = MANUAL_URL
-    logger.info(f"✅ Using manual WEBHOOK_URL: {BASE_URL}")
-else:
-    # Используем HTTPS через nginx
-    BASE_URL = f"https://{SERVER_IP}"
-    logger.info(f"✅ Using server IP with HTTPS: {BASE_URL}")
-
-WEBHOOK_PATH = "/webhook"
-FULL_WEBHOOK_URL = f"{BASE_URL.rstrip('/')}{WEBHOOK_PATH}"
 
 
 # --- LIFESPAN ДЛЯ FASTAPI ---

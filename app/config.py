@@ -40,4 +40,8 @@ STRESS_OPTIONS = ["Утром", "Днём", "Вечером", "Скорее ра
 # --- НАСТРОЙКА FASTAPI ДЛЯ WEBHOOK ---
 SERVER_IP = "185.185.142.217"
 SERVER_PORT = os.getenv("PORT", "8000")
-MANUAL_URL = os.getenv("WEBHOOK_URL")
+
+# Используем HTTPS через nginx
+BASE_URL = f"https://{SERVER_IP}"
+WEBHOOK_PATH = "/webhook"
+FULL_WEBHOOK_URL = f"{BASE_URL.rstrip('/')}{WEBHOOK_PATH}"

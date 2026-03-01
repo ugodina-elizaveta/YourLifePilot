@@ -9,8 +9,8 @@ from telegram import Update
 from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes, ConversationHandler
 
 from app.anketa import cancel, q1_handler, q2_handler, q3_handler, q4_handler, q5_handler
-from app.app import FULL_WEBHOOK_URL, WEBHOOK_PATH, app, bot_app
-from app.config import AGREEMENT, Q1, Q2, Q3, Q4, Q5, user_data_store
+from app.app import app, bot_app
+from app.config import AGREEMENT, FULL_WEBHOOK_URL, Q1, Q2, Q3, Q4, Q5, WEBHOOK_PATH, user_data_store
 from app.handler import (
     day_stress_handler,
     evening_action_handler,
