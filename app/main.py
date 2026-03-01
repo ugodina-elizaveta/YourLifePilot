@@ -1,14 +1,16 @@
+import asyncio
 import logging
 import os
 import sys
 from datetime import datetime
 
-from fastapi import FastAPI, Request
+from fastapi import Request
 from telegram import Update
-from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, ConversationHandler
+from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes, ConversationHandler
 
 from app.anketa import cancel, q1_handler, q2_handler, q3_handler, q4_handler, q5_handler
-from app.config import AGREEMENT, BOT_TOKEN, Q1, Q2, Q3, Q4, Q5, user_data_store, user_stats_store
+from app.app import FULL_WEBHOOK_URL, WEBHOOK_PATH, app, bot_app
+from app.config import AGREEMENT, Q1, Q2, Q3, Q4, Q5, user_data_store
 from app.handler import (
     day_stress_handler,
     evening_action_handler,
@@ -16,7 +18,7 @@ from app.handler import (
     morning_action_handler,
     morning_micro_handler,
 )
-from app.menu import get_simple_keyboard
+from app.sheduler import send_day_stress_message, send_evening_message, send_morning_message
 from app.start import agreement_handler, start
 
 # Настройка логирования
@@ -24,176 +26,61 @@ logging.basicConfig(
     level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', stream=sys.stdout
 )
 logger = logging.getLogger(__name__)
-
-# Создаем FastAPI приложение
-app = FastAPI()
-
-# Проверка токена
-if not BOT_TOKEN:
-    logger.error("❌ BOT_TOKEN not configured!")
-    sys.exit(1)
-
-# Создаем экземпляр бота
-bot_app = Application.builder().token(BOT_TOKEN).build()
-logger.info("✅ Bot application created")
-
-# Для отслеживания активности
 last_activity = datetime.now()
 
 
-# --- Функции для планировщика ---
-async def send_morning_message(context: ContextTypes.DEFAULT_TYPE):
-    """Отправляет утреннее сообщение всем пользователям, прошедшим онбординг."""
-    for user_id, data in user_data_store.items():
-        if data.get('onboarding_complete', False):
-            try:
-                base_text = "Доброе утро! Как ты проснулся(лась) сегодня?\nДавай заодно сделаем маленький шаг для более ясного утра."
-                stats = user_stats_store.get(user_id, {})
-                morning_streak = stats.get('morning_streak', 0)
-                morning_skip_streak = stats.get('morning_skip_streak', 0)
+# --- ПЛАНИРОВЩИК ЗАДАЧ ---
+async def run_scheduler():
+    """Планировщик для периодических рассылок"""
+    logger.info("🕐 Планировщик запущен")
 
-                if morning_streak >= 3:
-                    praise_text = (
-                        f"\n\nВижу, ты уже {morning_streak} утра подряд делаешь этот маленький шаг — это круто 👏\n"
-                        "Если чувствуешь силы, давай сегодня чуть усилим ритуал:\n"
-                        "попробуй не только вдохи, но и 3 минуты почитать что‑то спокойное или сделать растяжку."
-                    )
-                    await context.bot.send_message(
-                        chat_id=user_id,
-                        text=base_text + praise_text,
-                        reply_markup=get_simple_keyboard(
-                            {
-                                "😊 Нормально": "morning_normal",
-                                "🥱 Разбит(а)": "morning_broken",
-                                "😐 Пока непонятно": "morning_unknown",
-                            }
-                        ),
-                    )
-                elif morning_skip_streak >= 3:
-                    soft_text = (
-                        "\n\nПохоже, сейчас у тебя слишком плотные утра, и это нормально.\n"
-                        "Давай сделаем совсем простой вариант:\n"
-                        "сегодня достаточно просто встать с кровати и улыбнуться своему отражению."
-                    )
-                    await context.bot.send_message(
-                        chat_id=user_id,
-                        text=base_text + soft_text,
-                        reply_markup=get_simple_keyboard(
-                            {
-                                "😊 Нормально": "morning_normal",
-                                "🥱 Разбит(а)": "morning_broken",
-                                "😐 Пока непонятно": "morning_unknown",
-                            }
-                        ),
-                    )
-                else:
-                    await context.bot.send_message(
-                        chat_id=user_id,
-                        text=base_text,
-                        reply_markup=get_simple_keyboard(
-                            {
-                                "😊 Нормально": "morning_normal",
-                                "🥱 Разбит(а)": "morning_broken",
-                                "😐 Пока непонятно": "morning_unknown",
-                            }
-                        ),
-                    )
-            except Exception as e:
-                logger.error(f"Не удалось отправить утреннее сообщение пользователю {user_id}: {e}")
+    while True:
+        try:
+            now = datetime.now()
+            current_time = now.time()
 
+            # Утренняя рассылка в 9:00
+            if current_time.hour == 9 and current_time.minute == 0 and current_time.second < 10:
+                logger.info("⏰ Запуск утренней рассылки по расписанию")
 
-async def send_evening_message(context: ContextTypes.DEFAULT_TYPE):
-    """Отправляет вечернее сообщение."""
-    for user_id, data in user_data_store.items():
-        if data.get('onboarding_complete', False):
-            try:
-                base_text = (
-                    "Как проходит вечер? Давай поможем себе лечь пораньше.\n"
-                    "Предлагаю маленький шаг:\n"
-                    "за 15–20 минут до сна убрать яркий экран и сделать 1–2 минуты спокойного дыхания."
-                )
-                stats = user_stats_store.get(user_id, {})
-                evening_streak = stats.get('evening_streak', 0)
-                evening_skip_streak = stats.get('evening_skip_streak', 0)
+                class DummyContext:
+                    def __init__(self, bot):
+                        self.bot = bot
 
-                if evening_streak >= 3:
-                    text = (
-                        f"Вижу, ты уже {evening_streak} вечеров подряд делаешь этот маленький шаг — это круто 👏\n"
-                        "Если чувствуешь силы, давай чуть усилим ритуал:\n"
-                        "сегодня попробуй не только убрать экран, но и 3 минуты почитать что‑то спокойное или сделать растяжку."
-                    )
-                    await context.bot.send_message(
-                        chat_id=user_id,
-                        text=text,
-                        reply_markup=get_simple_keyboard(
-                            {
-                                "Ок, попробую": "evening_do",
-                                "Пока рано, оставим как было": "evening_not_now",
-                            }
-                        ),
-                    )
-                elif evening_skip_streak >= 3:
-                    text = (
-                        "Похоже, сейчас у тебя слишком плотные вечера, и это нормально.\n"
-                        "Давай сделаем совсем простой вариант:\n"
-                        "сегодня достаточно просто поставить себе будильник на желаемое время отхода ко сну"
-                        " и хотя бы на 30 минут приблизиться к нему."
-                    )
-                    await context.bot.send_message(
-                        chat_id=user_id,
-                        text=text,
-                        reply_markup=get_simple_keyboard(
-                            {
-                                "Ок, так проще": "evening_do",
-                                "Не хочу сейчас этим заниматься": "evening_not_now",
-                            }
-                        ),
-                    )
-                else:
-                    await context.bot.send_message(
-                        chat_id=user_id,
-                        text=base_text,
-                        reply_markup=get_simple_keyboard(
-                            {
-                                "Сделаю сегодня": "evening_do",
-                                "Не сейчас": "evening_not_now",
-                            }
-                        ),
-                    )
-            except Exception as e:
-                logger.error(f"Не удалось отправить вечернее сообщение пользователю {user_id}: {e}")
+                dummy_context = DummyContext(bot_app.bot)
+                await send_morning_message(dummy_context)
+                await asyncio.sleep(60)  # Пропускаем минуту
 
+            # Дневная рассылка в 15:00
+            elif current_time.hour == 15 and current_time.minute == 0 and current_time.second < 10:
+                logger.info("⏰ Запуск дневной рассылки по расписанию")
 
-async def send_day_stress_message(context: ContextTypes.DEFAULT_TYPE):
-    """Отправляет дневное сообщение только тем, у кого сценарий 'днём высокий стресс'."""
-    for user_id, data in user_data_store.items():
-        if data.get('onboarding_complete', False) and 'днём высокий стресс' in data.get('scenario', []):
-            try:
-                text = (
-                    "Как день? Если чувствуешь, что голова закипает, давай сделаем 30‑секундную паузу:\n"
-                    "посмотри в окно или на дальнюю точку, сделай 5 медленных вдохов и потяни плечи."
-                )
-                stats = user_stats_store.get(user_id, {})
-                day_streak = stats.get('day_stress_streak', 0)
-                day_skip_streak = stats.get('day_stress_skip_streak', 0)
+                class DummyContext:
+                    def __init__(self, bot):
+                        self.bot = bot
 
-                if day_streak >= 3:
-                    text = "Супер! Ты уже несколько дней делаешь паузу. Если есть силы, добавь к паузе стакан воды."
-                elif day_skip_streak >= 3:
-                    text = "Вижу, сейчас сложно. Попробуй хотя бы просто выключить звук на телефоне на 1 минуту."
+                dummy_context = DummyContext(bot_app.bot)
+                await send_day_stress_message(dummy_context)
+                await asyncio.sleep(60)
 
-                await context.bot.send_message(
-                    chat_id=user_id,
-                    text=text,
-                    reply_markup=get_simple_keyboard(
-                        {
-                            "✅ Сделал(а)": "day_stress_done",
-                            "Не до этого": "day_stress_skip",
-                        }
-                    ),
-                )
-            except Exception as e:
-                logger.error(f"Не удалось отправить дневное сообщение пользователю {user_id}: {e}")
+            # Вечерняя рассылка в 21:00
+            elif current_time.hour == 21 and current_time.minute == 0 and current_time.second < 10:
+                logger.info("⏰ Запуск вечерней рассылки по расписанию")
+
+                class DummyContext:
+                    def __init__(self, bot):
+                        self.bot = bot
+
+                dummy_context = DummyContext(bot_app.bot)
+                await send_evening_message(dummy_context)
+                await asyncio.sleep(60)
+
+            # Проверка каждые 30 секунд
+            await asyncio.sleep(30)
+
+        except Exception as e:
+            logger.error(f"Ошибка в планировщике: {e}")
+            await asyncio.sleep(60)  # При ошибке ждем минуту
 
 
 # --- НАСТРОЙКА ОБРАБОТЧИКОВ ---
@@ -242,60 +129,6 @@ def setup_handlers():
     logger.info("✅ Handlers configured")
 
 
-# Вызываем настройку обработчиков
-setup_handlers()
-
-# --- НАСТРОЙКА FASTAPI ДЛЯ WEBHOOK ---
-SERVER_IP = "185.185.142.217"
-SERVER_PORT = os.getenv("PORT", "8000")
-MANUAL_URL = os.getenv("WEBHOOK_URL")
-
-if MANUAL_URL:
-    BASE_URL = MANUAL_URL
-    logger.info(f"✅ Using manual WEBHOOK_URL: {BASE_URL}")
-else:
-    # Используем HTTPS через nginx
-    BASE_URL = f"https://{SERVER_IP}"
-    logger.info(f"✅ Using server IP with HTTPS: {BASE_URL}")
-
-WEBHOOK_PATH = "/webhook"
-FULL_WEBHOOK_URL = f"{BASE_URL.rstrip('/')}{WEBHOOK_PATH}"
-
-
-@app.on_event("startup")
-async def on_startup():
-    """Инициализация бота и установка вебхука"""
-    global last_activity
-    last_activity = datetime.now()
-
-    logger.info("🚀 Starting application...")
-
-    try:
-        # 1. Инициализируем бота
-        await bot_app.initialize()
-        logger.info("✅ Bot initialized")
-
-        # 2. Устанавливаем вебхук
-        if FULL_WEBHOOK_URL:
-            webhook_info = await bot_app.bot.get_webhook_info()
-            logger.info(f"Current webhook: {webhook_info.url}")
-
-            result = await bot_app.bot.set_webhook(
-                url=FULL_WEBHOOK_URL, allowed_updates=Update.ALL_TYPES, drop_pending_updates=True
-            )
-
-            if result:
-                logger.info(f"✅ Webhook set to {FULL_WEBHOOK_URL}")
-            else:
-                logger.error("❌ Failed to set webhook")
-        else:
-            logger.warning("⚠️ No webhook URL configured - bot will not receive updates")
-
-    except Exception as e:
-        logger.error(f"❌ Startup error: {e}")
-        raise
-
-
 @app.post(WEBHOOK_PATH)
 async def webhook(request: Request):
     """Обработка входящих обновлений от Telegram"""
@@ -318,23 +151,6 @@ async def webhook(request: Request):
     except Exception as e:
         logger.error(f"Error processing update: {e}", exc_info=True)
         return {"ok": False, "error": str(e)}
-
-
-@app.on_event("shutdown")
-async def on_shutdown():
-    """Остановка бота"""
-    logger.info("Shutting down...")
-    try:
-        # Удаляем вебхук
-        await bot_app.bot.delete_webhook()
-        logger.info("✅ Webhook deleted")
-
-        # Останавливаем бота
-        await bot_app.shutdown()
-        logger.info("✅ Bot shut down")
-
-    except Exception as e:
-        logger.error(f"Shutdown error: {e}")
 
 
 # Эндпоинты для проверки статуса
@@ -366,6 +182,7 @@ async def health():
 async def trigger_morning_webhook():
     """Для тестового запуска утренней рассылки"""
     try:
+
         class DummyContext:
             def __init__(self, bot):
                 self.bot = bot
@@ -382,6 +199,7 @@ async def trigger_morning_webhook():
 async def trigger_evening_webhook():
     """Для тестового запуска вечерней рассылки"""
     try:
+
         class DummyContext:
             def __init__(self, bot):
                 self.bot = bot
@@ -398,6 +216,7 @@ async def trigger_evening_webhook():
 async def trigger_day_webhook():
     """Для тестового запуска дневной рассылки"""
     try:
+
         class DummyContext:
             def __init__(self, bot):
                 self.bot = bot
@@ -407,6 +226,33 @@ async def trigger_day_webhook():
         return {"ok": True, "message": "Day messages sent"}
     except Exception as e:
         logger.error(f"Error in trigger-day: {e}")
+        return {"ok": False, "error": str(e)}
+
+
+@app.get("/test-newsletter")
+async def test_newsletter(type: str = "morning"):
+    """Тестовый запуск рассылки: /test-newsletter?type=morning/evening/day"""
+    try:
+
+        class DummyContext:
+            def __init__(self, bot):
+                self.bot = bot
+
+        dummy_context = DummyContext(bot_app.bot)
+
+        if type == "morning":
+            await send_morning_message(dummy_context)
+            return {"ok": True, "message": "Тестовая утренняя рассылка выполнена"}
+        elif type == "evening":
+            await send_evening_message(dummy_context)
+            return {"ok": True, "message": "Тестовая вечерняя рассылка выполнена"}
+        elif type == "day":
+            await send_day_stress_message(dummy_context)
+            return {"ok": True, "message": "Тестовая дневная рассылка выполнена"}
+        else:
+            return {"ok": False, "error": "Неверный тип. Используйте: morning/evening/day"}
+    except Exception as e:
+        logger.error(f"Ошибка в тестовой рассылке: {e}")
         return {"ok": False, "error": str(e)}
 
 
