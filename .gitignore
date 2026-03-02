@@ -1,12 +1,36 @@
-.DS_Store
-.idea
-.*/*
-venv
-*.json
-*.pyc
-*.log
-__pycache__
-*.env
+# Environment files
+.env
+.env.docker
+.env.production
+.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+env/
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
 .coverage
-reports
-.flake8
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+logs/
+*.log
+
+# Docker
+*.pid
+*.seed
+*.pid.lock
