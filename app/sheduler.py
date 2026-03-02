@@ -248,10 +248,6 @@ async def run_scheduler():
             current_time = now.time()
             check_counter += 1
 
-            # Лог каждую минуту для подтверждения работы (только в DEBUG режиме)
-            # if current_time.second < 5:
-            #     logger.debug(f"⏱️ Планировщик активен: {current_time.hour:02d}:{current_time.minute:02d}:{current_time.second:02d}")
-
             # Утренняя рассылка в 9:00
             if current_time.hour == 9 and current_time.minute == 0 and current_time.second < 10:
                 logger.info("🎯" + "=" * 50)
@@ -269,7 +265,7 @@ async def run_scheduler():
                 await send_morning_message(dummy_context)
 
                 logger.info("✅ Утренняя рассылка полностью завершена")
-                await asyncio.sleep(60)  # Пропускаем минуту, чтобы не сработать повторно
+                await asyncio.sleep(60)
 
             # Дневная рассылка в 15:00
             elif current_time.hour == 15 and current_time.minute == 0 and current_time.second < 10:
@@ -309,24 +305,20 @@ async def run_scheduler():
                 logger.info("✅ Вечерняя рассылка полностью завершена")
                 await asyncio.sleep(60)
 
-            # Лог каждые 5 минут о том, что планировщик работает
-            if check_counter % 10 == 0:  # 10 * 30 сек = 5 минут
-                logger.info(
-                    f"✅ Планировщик активен. Текущее время: {current_time.hour:02d}:{current_time.minute:02d}:{current_time.second:02d}"
-                )
-                logger.info(f"✅ В базе данных {len(user_data_store)} пользователей")
+            # Лог каждый час о том, что планировщик работает
+            if check_counter % 120 == 0:  # 120 * 30 сек = 3600 сек = 1 час
+                logger.info("=" * 50)
+                logger.info("⏰ ЧАСОВОЙ ОТЧЕТ ПЛАНИРОВЩИКА")
+                logger.info(f"В базе данных {len(user_data_store)} пользователей")
 
                 # Подсчет пользователей с онбордингом
                 onboarded = sum(1 for u in user_data_store.values() if u.get('onboarding_complete', False))
-                logger.info(f"✅ Из них прошли онбординг: {onboarded}")
+                logger.info(f"Из них прошли онбординг: {onboarded}")
 
-            # Проверка каждые 30 секунд
-            await asyncio.sleep(30)
+                logger.info("=" * 50)
+            # Проверка каждые 60 секунд
+            await asyncio.sleep(60)
 
         except Exception as e:
             logger.error(f"❌ КРИТИЧЕСКАЯ ОШИБКА в планировщике: {e}", exc_info=True)
-            logger.error(f"❌ Тип ошибки: {type(e).__name__}")
-            import traceback
-
-            logger.error(f"❌ Traceback: {traceback.format_exc()}")
-            await asyncio.sleep(60)  # При ошибке ждем минуту и пробуем снова
+            await asyncio.sleep(60)
