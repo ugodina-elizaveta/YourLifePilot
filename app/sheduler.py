@@ -249,7 +249,7 @@ async def run_scheduler():
             check_counter += 1
 
             # Утренняя рассылка в 9:00
-            if current_time.hour == 9 and current_time.minute == 0 and current_time.second < 10:
+            if current_time.hour == 9 and current_time.minute == 0:
                 logger.info("🎯" + "=" * 50)
                 logger.info("🎯 СРАБОТАЛО: УТРЕННЯЯ РАССЫЛКА в 9:00")
                 logger.info(
@@ -268,7 +268,7 @@ async def run_scheduler():
                 await asyncio.sleep(60)
 
             # Дневная рассылка в 15:00
-            elif current_time.hour == 15 and current_time.minute == 0 and current_time.second < 10:
+            elif current_time.hour == 15 and current_time.minute == 0:
                 logger.info("🎯" + "=" * 50)
                 logger.info("🎯 СРАБОТАЛО: ДНЕВНАЯ РАССЫЛКА в 15:00")
                 logger.info(
@@ -287,7 +287,7 @@ async def run_scheduler():
                 await asyncio.sleep(60)
 
             # Вечерняя рассылка в 21:00
-            elif current_time.hour == 21 and current_time.minute == 0 and current_time.second < 10:
+            elif current_time.hour == 21 and current_time.minute == 0:
                 logger.info("🎯" + "=" * 50)
                 logger.info("🎯 СРАБОТАЛО: ВЕЧЕРНЯЯ РАССЫЛКА в 21:00")
                 logger.info(
@@ -321,4 +321,4 @@ async def run_scheduler():
 
         except Exception as e:
             logger.error(f"❌ КРИТИЧЕСКАЯ ОШИБКА в планировщике: {e}", exc_info=True)
-            await asyncio.sleep(60)
+            await asyncio.sleep(30)
