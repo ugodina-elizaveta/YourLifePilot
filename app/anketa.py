@@ -1,3 +1,6 @@
+from telegram import Update
+from telegram.ext import ContextTypes, ConversationHandler
+
 from app.config import (
     Q1_OPTIONS,
     Q2,
@@ -11,11 +14,11 @@ from app.config import (
     STRESS_OPTIONS,
     TIME_OPTIONS,
     user_data_store,
-    WAKE_OPTIONS
+    user_stats_store,
+    WAKE_OPTIONS,
 )
+from app.database import db
 from app.menu import get_keyboard
-from telegram import Update
-from telegram.ext import ContextTypes, ConversationHandler
 
 
 # --- Обработчики вопросов онбординга ---
@@ -115,9 +118,16 @@ async def q5_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         if 'днём высокий стресс' not in user_data_store[user_id]['scenario']:
             user_data_store[user_id]['scenario'].append('днём высокий стресс')
 
-    # Сохраняем, что онбординг пройден
+    # Онбординг завершен
     user_data_store[user_id]['onboarding_complete'] = True
-    user_data_store[user_id]['scenario'] = list(set(user_data_store[user_id]['scenario']))  # убираем дубли
+    user_data_store[user_id]['scenario'] = list(set(user_data_store[user_id]['scenario']))
+
+    # Сохраняем в базу данных
+    await db.save_user(user_id, user_data_store[user_id])
+    await db.save_user_stats(user_id, user_stats_store[user_id])
+
+    # Сохраняем действие
+    await db.save_action(user_id, "onboarding", "completed", {"scenario": user_data_store[user_id]['scenario']})
 
     await query.edit_message_text(
         "Спасибо за ответы! Твой сценарий:"

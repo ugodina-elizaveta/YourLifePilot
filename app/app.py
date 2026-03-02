@@ -7,8 +7,9 @@ from datetime import datetime
 from fastapi import FastAPI
 from telegram import Update
 
-from app.bot_app import bot_app
+from app.bot_app import bot_app, load_users_to_cache
 from app.config import FULL_WEBHOOK_URL
+from app.database import db
 from app.handler import setup_handlers
 from app.sheduler import run_scheduler
 
@@ -37,11 +38,19 @@ async def lifespan(app: FastAPI):
     logger.info("🚀 Запуск приложения...")
 
     try:
-        # 1. Инициализируем бота
+        # 1. Подключаемся к базе данных
+        await db.connect()
+        logger.info("✅ База данных подключена")
+
+        # 2. Загружаем пользователей в кэш
+        await load_users_to_cache()
+        logger.info("✅ Кэш пользователей загружен")
+
+        # 3. Инициализируем бота
         await bot_app.initialize()
         logger.info("✅ Бот инициализирован")
 
-        # 2. Устанавливаем вебхук
+        # 4. Устанавливаем вебхук
         if FULL_WEBHOOK_URL:
             webhook_info = await bot_app.bot.get_webhook_info()
             logger.info(f"Текущий webhook: {webhook_info.url}")
@@ -51,10 +60,10 @@ async def lifespan(app: FastAPI):
 
             result = await bot_app.bot.set_webhook(
                 url=FULL_WEBHOOK_URL,
-                certificate=certificate,  # Передаем сертификат как байты
+                certificate=certificate,
                 allowed_updates=Update.ALL_TYPES,
                 drop_pending_updates=True,
-                max_connections=40
+                max_connections=40,
             )
 
             if result:
@@ -62,7 +71,7 @@ async def lifespan(app: FastAPI):
             else:
                 logger.error("❌ Не удалось установить webhook")
 
-        # 3. Запускаем планировщик
+        # 5. Запускаем планировщик
         scheduler_task = asyncio.create_task(run_scheduler())
         scheduler_tasks.append(scheduler_task)
         logger.info("✅ Планировщик запущен")
@@ -84,6 +93,10 @@ async def lifespan(app: FastAPI):
         # Останавливаем бота
         await bot_app.shutdown()
         logger.info("✅ Бот остановлен")
+
+        # Закрываем соединение с БД
+        await db.close()
+        logger.info("✅ Соединение с БД закрыто")
 
 
 app = FastAPI(lifespan=lifespan)

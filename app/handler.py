@@ -7,6 +7,7 @@ from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes, Con
 from app.anketa import cancel, q1_handler, q2_handler, q3_handler, q4_handler, q5_handler
 from app.bot_app import bot_app
 from app.config import AGREEMENT, Q1, Q2, Q3, Q4, Q5, user_data_store, user_stats_store
+from app.database import db
 from app.menu import get_simple_keyboard
 from app.sheduler import send_day_stress_message, send_evening_message, send_morning_message
 from app.start import agreement_handler, start
@@ -15,7 +16,6 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 
-# --- Обработчики действий пользователя (утро, вечер, день) ---
 async def morning_action_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка ответов на утреннее сообщение."""
     query = update.callback_query
@@ -28,6 +28,7 @@ async def morning_action_handler(update: Update, context: ContextTypes.DEFAULT_T
     if data == "morning_normal":
         text = "Рад слышать! Хорошего дня."
         user_stats_store[user_id]['morning_skip_streak'] = 0
+        await db.save_action(user_id, "morning", "normal")
 
     elif data == "morning_broken":
         if 'просыпаюсь разбитым' in user_data_store.get(user_id, {}).get('scenario', []):
@@ -41,12 +42,15 @@ async def morning_action_handler(update: Update, context: ContextTypes.DEFAULT_T
                     }
                 ),
             )
+            await db.save_action(user_id, "morning", "broken_with_scenario")
             return
         else:
             text = "Жаль. Если хочешь, можешь сделать пару глубоких вдохов, чтобы взбодриться."
+            await db.save_action(user_id, "morning", "broken_without_scenario")
 
     elif data == "morning_unknown":
         text = "Хорошо, понаблюдай за собой. Если будет нужна поддержка, я рядом."
+        await db.save_action(user_id, "morning", "unknown")
 
     if text is not None:
         await query.edit_message_text(text)
@@ -68,12 +72,16 @@ async def morning_micro_handler(update: Update, context: ContextTypes.DEFAULT_TY
         user_stats_store[user_id]['morning_streak'] = user_stats_store[user_id].get('morning_streak', 0) + 1
         user_stats_store[user_id]['morning_skip_streak'] = 0
         user_stats_store[user_id]['last_action_date']['morning'] = today
+        await db.save_action(user_id, "micro", "done")
+        await db.save_user_stats(user_id, user_stats_store[user_id])
 
     elif data == "morning_micro_later":
         await query.edit_message_text("Хорошо, можешь вернуться к этому позже. Я напомню завтра.")
         user_stats_store[user_id]['morning_skip_streak'] = user_stats_store[user_id].get('morning_skip_streak', 0) + 1
         user_stats_store[user_id]['morning_streak'] = 0
         user_stats_store[user_id]['last_action_date']['morning'] = today
+        await db.save_action(user_id, "micro", "skipped")
+        await db.save_user_stats(user_id, user_stats_store[user_id])
 
 
 async def evening_action_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -91,12 +99,16 @@ async def evening_action_handler(update: Update, context: ContextTypes.DEFAULT_T
         user_stats_store[user_id]['evening_streak'] = user_stats_store[user_id].get('evening_streak', 0) + 1
         user_stats_store[user_id]['evening_skip_streak'] = 0
         user_stats_store[user_id]['last_action_date']['evening'] = today
+        await db.save_action(user_id, "evening", "do")
+        await db.save_user_stats(user_id, user_stats_store[user_id])
 
     elif data == "evening_not_now":
         text = "Хорошо, в другой раз. Главное — быть в контакте с собой."
         user_stats_store[user_id]['evening_skip_streak'] = user_stats_store[user_id].get('evening_skip_streak', 0) + 1
         user_stats_store[user_id]['evening_streak'] = 0
         user_stats_store[user_id]['last_action_date']['evening'] = today
+        await db.save_action(user_id, "evening", "not_now")
+        await db.save_user_stats(user_id, user_stats_store[user_id])
 
     if text is not None:
         await query.edit_message_text(text)
@@ -135,12 +147,16 @@ async def feeling_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     feeling = feeling_map.get(data, "Неизвестно")
 
     if user_id not in user_data_store:
-        user_data_store[user_id] = {}
+        user_data_store[user_id] = {'mood_history': []}
 
     if 'mood_history' not in user_data_store[user_id]:
         user_data_store[user_id]['mood_history'] = []
 
     user_data_store[user_id]['mood_history'].append({'date': datetime.now().isoformat(), 'feeling': feeling})
+
+    # Сохраняем в БД
+    await db.save_mood(user_id, feeling)
+    await db.save_action(user_id, "feeling", data)
 
     await query.edit_message_text(f"Спасибо, что поделился(лась). Записал: {feeling}")
 
@@ -160,6 +176,8 @@ async def day_stress_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         user_stats_store[user_id]['day_stress_streak'] = user_stats_store[user_id].get('day_stress_streak', 0) + 1
         user_stats_store[user_id]['day_stress_skip_streak'] = 0
         user_stats_store[user_id]['last_action_date']['day_stress'] = today
+        await db.save_action(user_id, "stress", "done")
+        await db.save_user_stats(user_id, user_stats_store[user_id])
 
     elif data == "day_stress_skip":
         text = "Понимаю. Если будет возможность, просто подыши глубоко пару раз."
@@ -168,6 +186,8 @@ async def day_stress_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         user_stats_store[user_id]['day_stress_streak'] = 0
         user_stats_store[user_id]['last_action_date']['day_stress'] = today
+        await db.save_action(user_id, "stress", "skipped")
+        await db.save_user_stats(user_id, user_stats_store[user_id])
 
     if text is not None:
         await query.edit_message_text(text)

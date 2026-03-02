@@ -1,19 +1,27 @@
 import os
+from typing import Any, Dict
 
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+# Токен бота
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-# Состояния для ConversationHandler онбординга
+
+# Настройки БД
+DB_HOST = os.getenv("DB_HOST", "localhost")
+DB_PORT = os.getenv("DB_PORT", "5432")
+DB_NAME = os.getenv("DB_NAME", "yourlifepilot")
+DB_USER = os.getenv("DB_USER", "yourlifepilot_user")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "")
+DATABASE_URL = os.getenv("DATABASE_URL", f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}")
+
+# Состояния для ConversationHandler
 AGREEMENT, Q1, Q2, Q3, Q4, Q5 = range(6)
 
-# Словарь для хранения данных пользователей (в реальном проекте заменить на БД)
-user_data_store = {}
+# Кэш для данных пользователей (основное хранилище - в БД)
+user_data_store: Dict[str, Any] = {}
+user_stats_store: Dict[str, Any] = {}
 
-# Словарь для хранения статистики по нажатиям (для логики "несколько дней подряд")
-user_stats_store = {}
-
-# --- Константы с текстами (как в ТЗ) ---
+# Константы с текстами
 WELCOME_TEXT = (
-    "Привет! Я YourLifePilot — цифровой помощник, который помогает наладить сон и чуть аккуратнее относиться к себе.\n"
+    "Привет! Я YourLifePilot — цифровой помощник, который помогает наладить сон и чуть аккуратнее относиться к себе.\n\n"
     "Я не врач и не ставлю диагнозы, моя роль — напоминать о маленьких шагах, поддерживать и задавать простые вопросы, "
     "чтобы тебе было легче держать курс."
 )
@@ -37,11 +45,8 @@ TIME_OPTIONS = ["До 22:00", "22:00–23:00", "23:00–00:00", "После по
 WAKE_OPTIONS = ["Бодрым(ой)", "Так себе, средне", "Разбитым(ой)"]
 STRESS_OPTIONS = ["Утром", "Днём", "Вечером", "Скорее равномерно в течение дня"]
 
-# --- НАСТРОЙКА FASTAPI ДЛЯ WEBHOOK ---
+# Настройки webhook
 SERVER_IP = "185.185.142.217"
 SERVER_PORT = os.getenv("PORT", "8000")
-
-# Используем HTTPS через nginx
-BASE_URL = f"https://{SERVER_IP}"
 WEBHOOK_PATH = "/webhook"
-FULL_WEBHOOK_URL = f"{BASE_URL.rstrip('/')}{WEBHOOK_PATH}"
+FULL_WEBHOOK_URL = f"https://{SERVER_IP}{WEBHOOK_PATH}"
