@@ -7,7 +7,6 @@ from telegram.ext import ContextTypes
 
 from app.bot_app import bot_app
 from app.config import user_data_store, user_stats_store
-from app.database import db
 from app.menu import get_simple_keyboard
 
 logger = logging.getLogger(__name__)
@@ -103,9 +102,6 @@ async def send_morning_message(context: ContextTypes.DEFAULT_TYPE):
         f"📊 [УТРО] Итог: отправлено {sent_count}/{total_users}, ошибок {error_count}, время {elapsed_time:.2f}с"
     )
 
-    # Сохраняем в БД
-    await db.save_newsletter_log("morning", sent_count, error_count, total_users)
-
 
 async def send_evening_message(context: ContextTypes.DEFAULT_TYPE):
     """Отправляет вечернее сообщение с контролем времени"""
@@ -200,8 +196,6 @@ async def send_evening_message(context: ContextTypes.DEFAULT_TYPE):
         f"📊 [ВЕЧЕР] Итог: отправлено {sent_count}/{total_users}, ошибок {error_count}, время {elapsed_time:.2f}с"
     )
 
-    await db.save_newsletter_log("evening", sent_count, error_count, total_users)
-
 
 async def send_day_stress_message(context: ContextTypes.DEFAULT_TYPE):
     """Отправляет дневное сообщение с контролем времени"""
@@ -268,8 +262,6 @@ async def send_day_stress_message(context: ContextTypes.DEFAULT_TYPE):
     logger.info(
         f"📊 [ДЕНЬ] Итог: стресс-пользователей {stress_users}, отправлено {sent_count}, ошибок {error_count}, время {elapsed_time:.2f}с"
     )
-
-    await db.save_newsletter_log("day_stress", sent_count, error_count, stress_users, {"stress_users": stress_users})
 
 
 # --- ПЛАНИРОВЩИК ЗАДАЧ ---
