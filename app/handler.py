@@ -93,7 +93,7 @@ async def evening_action_handler(update: Update, context: ContextTypes.DEFAULT_T
     today = datetime.now().date()
 
     text = None
-
+    
     if data == "evening_do":
         text = "Отлично! Маленький шаг запланирован."
         user_stats_store[user_id]['evening_streak'] = user_stats_store[user_id].get('evening_streak', 0) + 1
@@ -101,7 +101,7 @@ async def evening_action_handler(update: Update, context: ContextTypes.DEFAULT_T
         user_stats_store[user_id]['last_action_date']['evening'] = today
         await db.save_action(user_id, "evening", "do")
         await db.save_user_stats(user_id, user_stats_store[user_id])
-
+        
     elif data == "evening_not_now":
         text = "Хорошо, в другой раз. Главное — быть в контакте с собой."
         user_stats_store[user_id]['evening_skip_streak'] = user_stats_store[user_id].get('evening_skip_streak', 0) + 1
@@ -111,20 +111,21 @@ async def evening_action_handler(update: Update, context: ContextTypes.DEFAULT_T
         await db.save_user_stats(user_id, user_stats_store[user_id])
 
     if text is not None:
+        # Сначала отвечаем на callback
         await query.edit_message_text(text)
-
-        # Затем отправляем вопрос про самочувствие
+        
+        # Затем отправляем вопрос о самочувствии
         await query.message.reply_text(
             "И напоследок: как ты сейчас себя чувствуешь?",
-            reply_markup=get_simple_keyboard(
-                {
-                    "🙂 Спокойно": "feeling_calm",
-                    "😕 Напряжён(а)": "feeling_stressed",
-                    "😔 Грустно": "feeling_sad",
-                    "😩 Очень плохо": "feeling_bad",
-                }
-            ),
+            reply_markup=get_simple_keyboard({
+                "🙂 Спокойно": "feeling_calm",
+                "😕 Напряжён(а)": "feeling_stressed",
+                "😔 Грустно": "feeling_sad",
+                "😩 Очень плохо": "feeling_bad",
+            }),
         )
+        logger.info(f"✅ [ВЕЧЕР] Вопрос о настроении отправлен {user_id} после ответа")
+    
     else:
         logger.error(f"Необработанный callback data: {data} для пользователя {user_id}")
         await query.edit_message_text("Что-то пошло не так. Попробуй еще раз.")

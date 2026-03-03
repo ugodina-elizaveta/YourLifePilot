@@ -104,7 +104,7 @@ async def send_morning_message(context: ContextTypes.DEFAULT_TYPE):
 
 
 async def send_evening_message(context: ContextTypes.DEFAULT_TYPE):
-    """Отправляет вечернее сообщение с контролем времени"""
+    """Отправляет только основное вечернее сообщение (без вопроса о чувствах)"""
     start_time = time.time()
     current_time = datetime.now().strftime('%H:%M:%S')
     logger.info(f"📨 [ВЕЧЕР] Начало рассылки в {current_time}")
@@ -113,8 +113,7 @@ async def send_evening_message(context: ContextTypes.DEFAULT_TYPE):
         logger.warning("⚠️ [ВЕЧЕР] Нет пользователей")
         return
 
-    users_with_main = 0  # сколько пользователей получили основное сообщение
-    users_with_mood = 0  # сколько пользователей получили вопрос о настроении
+    sent_count = 0
     error_count = 0
     total_users = len([u for u in user_data_store.values() if u.get('onboarding_complete')])
 
@@ -122,10 +121,8 @@ async def send_evening_message(context: ContextTypes.DEFAULT_TYPE):
         if not data.get('onboarding_complete', False):
             continue
 
-        # user_processed = False  # флаг, что пользователь обработан
-
         try:
-            # Формируем основное сообщение
+            # Формируем только основное сообщение
             base_text = (
                 "Как проходит вечер? Давай поможем себе лечь пораньше.\n"
                 "Предлагаю маленький шаг:\n"
@@ -163,42 +160,17 @@ async def send_evening_message(context: ContextTypes.DEFAULT_TYPE):
                     "Не сейчас": "evening_not_now",
                 }
 
-            # ОТПРАВЛЯЕМ ОСНОВНОЕ СООБЩЕНИЕ
+            # Отправляем ТОЛЬКО ОСНОВНОЕ СООБЩЕНИЕ (без вопроса о чувствах)
             main_success = await send_message_with_retry(context.bot, user_id, text, keyboard)
 
             if main_success:
-                users_with_main += 1
+                sent_count += 1
                 logger.info(f"✅ [ВЕЧЕР] Основное сообщение отправлено {user_id}")
-                # user_processed = True
-
-                # Небольшая пауза между сообщениями
-                await asyncio.sleep(0.7)
-
-                # ОТПРАВЛЯЕМ ВОПРОС О НАСТРОЕНИИ
-                mood_success = await send_message_with_retry(
-                    context.bot,
-                    user_id,
-                    "И напоследок: как ты сейчас себя чувствуешь?",
-                    {
-                        "🙂 Спокойно": "feeling_calm",
-                        "😕 Напряжён(а)": "feeling_stressed",
-                        "😔 Грустно": "feeling_sad",
-                        "😩 Очень плохо": "feeling_bad",
-                    },
-                )
-
-                if mood_success:
-                    users_with_mood += 1
-                    logger.info(f"✅ [ВЕЧЕР] Вопрос о настроении отправлен {user_id}")
-                else:
-                    error_count += 1
-                    logger.error(f"❌ [ВЕЧЕР] Не отправлен вопрос настроения {user_id}")
             else:
                 error_count += 1
                 logger.error(f"❌ [ВЕЧЕР] Не отправлено основное сообщение {user_id}")
 
-            # Пауза между пользователями
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.5)  # Пауза между пользователями
 
         except Exception as e:
             error_count += 1
@@ -208,8 +180,7 @@ async def send_evening_message(context: ContextTypes.DEFAULT_TYPE):
     logger.info("=" * 60)
     logger.info("📊 [ВЕЧЕР] ИТОГИ РАССЫЛКИ:")
     logger.info(f"   👥 Всего пользователей с онбордингом: {total_users}")
-    logger.info(f"   ✅ Получили основное сообщение: {users_with_main}")
-    logger.info(f"   ✅ Получили вопрос о настроении: {users_with_mood}")
+    logger.info(f"   ✅ Отправлено основных сообщений: {sent_count}")
     logger.info(f"   ❌ Ошибок: {error_count}")
     logger.info(f"   ⏱️ Время выполнения: {elapsed_time:.2f}с")
     logger.info("=" * 60)
