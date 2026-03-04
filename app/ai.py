@@ -2,7 +2,7 @@ import logging
 import os
 
 # Hugging Face Transformers
-from transformers import pipeline
+from transformers import pipeline, set_seed
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +13,8 @@ class HuggingFaceAI:
     def __init__(self):
         self.device = -1  # Используем CPU
         self.models = {}
-        self.token = os.getenv("HF_TOKEN")  # Получаем токен из .env
+        self.token = os.getenv("HF_TOKEN")
+        set_seed(42)  # Для воспроизводимости
         self.load_models()
 
     def load_models(self):
@@ -28,22 +29,28 @@ class HuggingFaceAI:
             logger.info("✅ Модель анализа тональности загружена")
 
             # 2. Модель для генерации текста (русский язык)
+            model_name = "sberbank-ai/rugpt3xl"  # или можно использовать "tinkoff-ai/ruDialoGPT-small"
+
             self.models['generation'] = pipeline(
                 "text-generation",
-                model="ai-forever/rugpt3small_based_on_gpt2",
+                model=model_name,
                 device=self.device,
-                max_new_tokens=100,  # ВАЖНО: используем max_new_tokens вместо max_length
+                max_new_tokens=50,  # Ограничиваем длину ответа
                 temperature=0.7,
+                top_p=0.9,
+                repetition_penalty=1.2,  # Штраф за повторения (ВАЖНО!)
+                do_sample=True,
+                pad_token_id=50256,
             )
-            logger.info("✅ Модель генерации текста загружена")
+            logger.info(f"✅ Модель генерации текста загружена: {model_name}")
 
-            # 3. Модель для классификации эмоций (с токеном!)
+            # 3. Модель для классификации эмоций
             if self.token:
                 self.models['emotion'] = pipeline(
                     "text-classification",
                     model="seara/rubert-tiny2-ru-go-emotions",
                     device=self.device,
-                    token=self.token,  # Передаем токен для доступа
+                    token=self.token,
                 )
                 logger.info("✅ Модель определения эмоций загружена")
             else:
@@ -52,7 +59,6 @@ class HuggingFaceAI:
 
         except Exception as e:
             logger.error(f"❌ Ошибка загрузки моделей: {e}")
-            # Заглушки для тестирования
             self._load_fallback_models()
 
     def _create_mock_emotion_model(self):
@@ -69,14 +75,10 @@ class HuggingFaceAI:
         logger.warning("⚠️ Используются заглушки вместо реальных моделей")
 
         class MockModel:
-            def __call__(self, text, **kwargs):  # Добавляем **kwargs для совместимости
+            def __call__(self, text, **kwargs):
                 return [{'label': 'neutral', 'score': 0.8}]
 
         self.models = {'sentiment': MockModel(), 'emotion': MockModel(), 'generation': MockModel()}
-
-    # =================================================
-    # АНАЛИЗ НАСТРОЕНИЯ
-    # =================================================
 
     def analyze_sentiment(self, text: str) -> dict:
         """Анализирует тональность текста"""
@@ -85,7 +87,7 @@ class HuggingFaceAI:
             return {'label': result['label'], 'score': round(result['score'], 3)}
         except Exception as e:
             logger.error(f"Ошибка анализа тональности: {e}")
-            return {'label': 'neutral', 'score': 0.5}
+            return {'label': 'NEUTRAL', 'score': 0.5}
 
     def analyze_emotion(self, text: str) -> dict:
         """Определяет конкретную эмоцию"""
@@ -96,29 +98,38 @@ class HuggingFaceAI:
             logger.error(f"Ошибка определения эмоции: {e}")
             return {'label': 'neutral', 'score': 0.5}
 
-    # =================================================
-    # ГЕНЕРАЦИЯ СОВЕТОВ
-    # =================================================
-
     def generate_advice(self, user_context: str, situation: str) -> str:
         """Генерирует персонализированный совет"""
         try:
             prompt = self._create_advice_prompt(user_context, situation)
 
-            # ВАЖНО: используем правильные параметры
-            result = self.models['generation'](
-                prompt,
-                max_new_tokens=100,  # вместо max_length
-                temperature=0.8,
-                do_sample=True,
-                top_k=50,
-                top_p=0.95,
-                pad_token_id=50256,  # для GPT2
-            )[0]['generated_text']
+            # Параметры для генерации
+            generation_kwargs = {
+                'max_new_tokens': 60,
+                'temperature': 0.8,
+                'top_p': 0.9,
+                'repetition_penalty': 1.3,  # Сильный штраф за повторения
+                'do_sample': True,
+                'pad_token_id': 50256,
+                'eos_token_id': 50256,
+                'early_stopping': True,
+            }
+
+            # Генерируем ответ
+            result = self.models['generation'](prompt, **generation_kwargs)[0]['generated_text']
 
             # Убираем промпт из результата
             advice = result.replace(prompt, '').strip()
-            return advice if advice else self._get_fallback_advice(situation)
+
+            # Если ответ слишком длинный или пустой, используем fallback
+            if not advice or len(advice) < 10:
+                return self._get_fallback_advice(situation)
+
+            # Обрезаем до нормальной длины
+            if len(advice) > 200:
+                advice = advice[:200] + "..."
+
+            return advice
 
         except Exception as e:
             logger.error(f"Ошибка генерации совета: {e}")
@@ -127,35 +138,31 @@ class HuggingFaceAI:
     def _create_advice_prompt(self, user_context: str, situation: str) -> str:
         """Создает промпт для генерации совета"""
         prompts = {
-            'stress': f"Пользователь испытывает стресс. {user_context} Дай короткий, теплый совет как успокоиться:",
-            'sleep': f"У пользователя проблемы со сном. {user_context} Посоветуй что-то простое для лучшего сна:",
-            'sad': f"Пользователь грустит. {user_context} Поддержи его теплыми словами:",
-            'morning': f"Утро. {user_context} Дай совет как начать день бодро:",
-            'evening': f"Вечер. {user_context} Посоветуй как расслабиться перед сном:",
-            'general': f"{user_context} Дай дружеский совет:",
+            'stress': "Дай короткий, добрый совет человеку, который испытывает стресс:",
+            'sleep': "Посоветуй что-то простое для лучшего сна:",
+            'sad': "Поддержи человека, который грустит, тёплыми словами:",
+            'morning': "Дай совет как начать день бодро и позитивно:",
+            'evening': "Посоветуй как расслабиться перед сном:",
+            'general': "Дай дружеский совет:",
         }
         return prompts.get(situation, prompts['general'])
 
     def _get_fallback_advice(self, situation: str) -> str:
         """Запасные советы если AI не работает"""
         fallback = {
-            'stress': "Попробуй сделать глубокий вдох на 4 счета, задержать дыхание на 4, выдохнуть на 6. Повтори 5 раз.",
-            'sleep': "Постарайся лечь спать в одно и то же время. Это помогает настроить биоритмы.",
-            'sad': "Разреши себе погрустить немного. Это нормально. Завтра будет новый день.",
-            'morning': "Начни утро со стакана теплой воды. Это помогает проснуться.",
-            'evening': "Попробуй за час до сна убрать телефон и почитать книгу.",
-            'general': "Маленькие шаги каждый день приводят к большим изменениям.",
+            'stress': "Попробуй сделать глубокий вдох на 4 счета, задержать дыхание на 4, выдохнуть на 6. Повтори 5 раз. Это помогает успокоиться.",
+            'sleep': "Постарайся лечь спать в одно и то же время. За час до сна убери телефон и почитай книгу.",
+            'sad': "Разреши себе погрустить немного. Это нормально. Помни, что плохие дни всегда проходят.",
+            'morning': "Начни утро со стакана тёплой воды. Сделай лёгкую зарядку и улыбнись новому дню.",
+            'evening': "Попробуй за час до сна убрать телефон и почитать книгу. Тёплый душ тоже помогает расслабиться.",
+            'general': "Будь к себе добрее. Маленькие шаги каждый день приводят к большим изменениям.",
         }
         return fallback.get(situation, fallback['general'])
-
-    # =================================================
-    # АНАЛИЗ ИСТОРИИ НАСТРОЕНИЙ
-    # =================================================
 
     def analyze_mood_trend(self, mood_history: list[dict]) -> dict:
         """Анализирует тренд настроений"""
         if not mood_history or len(mood_history) < 3:
-            return {'trend': 'insufficient_data', 'message': 'Нужно больше данных', 'average': 2.5}
+            return {'trend': 'insufficient_data', 'message': 'Нужно больше данных для анализа', 'average': 2.5}
 
         # Преобразуем эмоции в числа
         mood_values = []

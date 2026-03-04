@@ -1,5 +1,4 @@
 import logging
-import os
 import sys
 from datetime import datetime
 
@@ -53,11 +52,11 @@ async def webhook_get():
     """Telegram иногда отправляет GET для проверки webhook"""
     logger.info("📞 GET request to webhook (health check)")
     return {
-        "ok": True, 
+        "ok": True,
         "message": "Webhook is active and listening",
         "method": "GET",
         "webhook_url": FULL_WEBHOOK_URL,
-        "timestamp": datetime.now().isoformat()
+        "timestamp": datetime.now().isoformat(),
     }
 
 
@@ -88,82 +87,73 @@ async def health():
 
 # Эндпоинты для тестовых рассылок
 @app.get("/trigger-morning")
-async def trigger_morning_webhook():
-    """Для тестового запуска утренней рассылки"""
+async def trigger_morning_webhook(user_id: str = None):
+    """
+    Тестовый запуск утренней рассылки.
+    Если указан user_id - только для этого пользователя.
+    Пример: /trigger-morning?user_id=962369479
+    """
     try:
+
         class DummyContext:
             def __init__(self, bot):
                 self.bot = bot
 
         dummy_context = DummyContext(bot_app.bot)
-        await send_morning_message(dummy_context)
-        return {"ok": True, "message": "Morning messages sent"}
+
+        if user_id:
+            await send_morning_message(dummy_context, target_user_id=user_id)
+            return {"ok": True, "message": f"Тестовая утренняя рассылка для пользователя {user_id} выполнена"}
+        else:
+            await send_morning_message(dummy_context)
+            return {"ok": True, "message": "Массовая утренняя рассылка выполнена"}
+
     except Exception as e:
         logger.error(f"Error in trigger-morning: {e}")
         return {"ok": False, "error": str(e)}
 
 
 @app.get("/trigger-evening")
-async def trigger_evening_webhook():
-    """Для тестового запуска вечерней рассылки"""
+async def trigger_evening_webhook(user_id: str = None):
+    """Тестовый запуск вечерней рассылки для конкретного пользователя"""
     try:
+
         class DummyContext:
             def __init__(self, bot):
                 self.bot = bot
 
         dummy_context = DummyContext(bot_app.bot)
-        await send_evening_message(dummy_context)
-        return {"ok": True, "message": "Evening messages sent"}
+
+        if user_id:
+            await send_evening_message(dummy_context, target_user_id=user_id)
+            return {"ok": True, "message": f"Тестовая вечерняя рассылка для пользователя {user_id} выполнена"}
+        else:
+            await send_evening_message(dummy_context)
+            return {"ok": True, "message": "Массовая вечерняя рассылка выполнена"}
+
     except Exception as e:
         logger.error(f"Error in trigger-evening: {e}")
         return {"ok": False, "error": str(e)}
 
 
 @app.get("/trigger-day")
-async def trigger_day_webhook():
-    """Для тестового запуска дневной рассылки"""
+async def trigger_day_webhook(user_id: str = None):
+    """Тестовый запуск дневной рассылки для конкретного пользователя"""
     try:
+
         class DummyContext:
             def __init__(self, bot):
                 self.bot = bot
 
         dummy_context = DummyContext(bot_app.bot)
-        await send_day_stress_message(dummy_context)
-        return {"ok": True, "message": "Day messages sent"}
+
+        if user_id:
+            await send_day_stress_message(dummy_context, target_user_id=user_id)
+            return {"ok": True, "message": f"Тестовая дневная рассылка для пользователя {user_id} выполнена"}
+        else:
+            await send_day_stress_message(dummy_context)
+            return {"ok": True, "message": "Массовая дневная рассылка выполнена"}
+
     except Exception as e:
         logger.error(f"Error in trigger-day: {e}")
         return {"ok": False, "error": str(e)}
-
-
-@app.get("/test-newsletter")
-async def test_newsletter(type: str = "morning"):
-    """Тестовый запуск рассылки: /test-newsletter?type=morning/evening/day"""
-    try:
-        class DummyContext:
-            def __init__(self, bot):
-                self.bot = bot
-
-        dummy_context = DummyContext(bot_app.bot)
-
-        if type == "morning":
-            await send_morning_message(dummy_context)
-            return {"ok": True, "message": "Тестовая утренняя рассылка выполнена"}
-        elif type == "evening":
-            await send_evening_message(dummy_context)
-            return {"ok": True, "message": "Тестовая вечерняя рассылка выполнена"}
-        elif type == "day":
-            await send_day_stress_message(dummy_context)
-            return {"ok": True, "message": "Тестовая дневная рассылка выполнена"}
-        else:
-            return {"ok": False, "error": "Неверный тип. Используйте: morning/evening/day"}
-    except Exception as e:
-        logger.error(f"Ошибка в тестовой рассылке: {e}")
-        return {"ok": False, "error": str(e)}
-
-
-# Для локального запуска
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.getenv("PORT", 8000))
-    # reload=False для продакшена!
-    uvicorn.run("app.app:app", host="0.0.0.0", port=port, reload=False)

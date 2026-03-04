@@ -2,6 +2,7 @@ import asyncio
 import logging
 import time
 from datetime import datetime
+from typing import Optional
 
 from telegram.ext import ContextTypes
 
@@ -36,11 +37,19 @@ async def send_message_with_retry(
     return False
 
 
-async def send_morning_message(context: ContextTypes.DEFAULT_TYPE):
-    """Отправляет утреннее сообщение с контролем времени"""
+async def send_morning_message(context: ContextTypes.DEFAULT_TYPE, target_user_id: Optional[str] = None):
+    """
+    Отправляет утреннее сообщение.
+    Если target_user_id указан - только этому пользователю,
+    иначе - всем пользователям, прошедшим онбординг.
+    """
     start_time = time.time()
     current_time = datetime.now().strftime('%H:%M:%S')
-    logger.info(f"📨 [УТРО] Начало рассылки в {current_time}")
+
+    if target_user_id:
+        logger.info(f"📨 [УТРО] Тестовая рассылка для пользователя {target_user_id} в {current_time}")
+    else:
+        logger.info(f"📨 [УТРО] Массовая рассылка в {current_time}")
 
     if not user_data_store:
         logger.warning("⚠️ [УТРО] Нет пользователей")
@@ -48,13 +57,34 @@ async def send_morning_message(context: ContextTypes.DEFAULT_TYPE):
 
     sent_count = 0
     error_count = 0
-    total_users = len(user_data_store)
 
-    for user_id, data in user_data_store.items():
-        if not data.get('onboarding_complete', False):
-            continue
+    # Определяем список пользователей для рассылки
+    users_to_send = []
+    if target_user_id:
+        if target_user_id in user_data_store:
+            users_to_send = [target_user_id]
+            logger.info(f"👤 [УТРО] Тестовый режим: отправка пользователю {target_user_id}")
+        else:
+            logger.error(f"❌ [УТРО] Пользователь {target_user_id} не найден")
+            return
+    else:
+        users_to_send = [uid for uid, data in user_data_store.items() if data.get('onboarding_complete', False)]
 
+    total_users = len(users_to_send)
+    if total_users == 0:
+        logger.warning("⚠️ [УТРО] Нет пользователей для рассылки")
+        return
+
+    logger.info(f"👥 [УТРО] Будет отправлено {total_users} пользователям")
+
+    for user_id in users_to_send:
         try:
+            data = user_data_store[user_id]
+
+            # Проверяем онбординг для массовой рассылки
+            if not target_user_id and not data.get('onboarding_complete', False):
+                continue
+
             base_text = "Доброе утро! Как ты проснулся(лась) сегодня?\nДавай заодно сделаем маленький шаг для более ясного утра."
             stats = user_stats_store.get(user_id, {})
             morning_streak = stats.get('morning_streak', 0)
@@ -92,23 +122,37 @@ async def send_morning_message(context: ContextTypes.DEFAULT_TYPE):
                 error_count += 1
                 logger.error(f"❌ [УТРО] Не удалось отправить {user_id}")
 
-            await asyncio.sleep(0.3)  # Пауза между сообщениями
+            await asyncio.sleep(0.3)
 
         except Exception as e:
             error_count += 1
             logger.error(f"❌ [УТРО] Критическая ошибка для {user_id}: {e}")
 
     elapsed_time = time.time() - start_time
-    logger.info(
-        f"📊 [УТРО] Итог: отправлено {sent_count}/{total_users}, ошибок {error_count}, время {elapsed_time:.2f}с"
-    )
+
+    if target_user_id:
+        logger.info(
+            f"📊 [УТРО] Тестовая рассылка для {target_user_id}: отправлено {sent_count}, ошибок {error_count}, время {elapsed_time:.2f}с"
+        )
+    else:
+        logger.info(
+            f"📊 [УТРО] Массовая рассылка: отправлено {sent_count}/{total_users}, ошибок {error_count}, время {elapsed_time:.2f}с"
+        )
 
 
-async def send_evening_message(context: ContextTypes.DEFAULT_TYPE):
-    """Отправляет только основное вечернее сообщение (без вопроса о чувствах)"""
+async def send_evening_message(context: ContextTypes.DEFAULT_TYPE, target_user_id: Optional[str] = None):
+    """
+    Отправляет вечернее сообщение.
+    Если target_user_id указан - только этому пользователю,
+    иначе - всем пользователям, прошедшим онбординг.
+    """
     start_time = time.time()
     current_time = datetime.now().strftime('%H:%M:%S')
-    logger.info(f"📨 [ВЕЧЕР] Начало рассылки в {current_time}")
+
+    if target_user_id:
+        logger.info(f"📨 [ВЕЧЕР] Тестовая рассылка для пользователя {target_user_id} в {current_time}")
+    else:
+        logger.info(f"📨 [ВЕЧЕР] Массовая рассылка в {current_time}")
 
     if not user_data_store:
         logger.warning("⚠️ [ВЕЧЕР] Нет пользователей")
@@ -116,13 +160,34 @@ async def send_evening_message(context: ContextTypes.DEFAULT_TYPE):
 
     sent_count = 0
     error_count = 0
-    total_users = len([u for u in user_data_store.values() if u.get('onboarding_complete')])
 
-    for user_id, data in user_data_store.items():
-        if not data.get('onboarding_complete', False):
-            continue
+    # Определяем список пользователей для рассылки
+    users_to_send = []
+    if target_user_id:
+        if target_user_id in user_data_store:
+            users_to_send = [target_user_id]
+            logger.info(f"👤 [ВЕЧЕР] Тестовый режим: отправка пользователю {target_user_id}")
+        else:
+            logger.error(f"❌ [ВЕЧЕР] Пользователь {target_user_id} не найден")
+            return
+    else:
+        users_to_send = [uid for uid, data in user_data_store.items() if data.get('onboarding_complete', False)]
 
+    total_users = len(users_to_send)
+    if total_users == 0:
+        logger.warning("⚠️ [ВЕЧЕР] Нет пользователей для рассылки")
+        return
+
+    logger.info(f"👥 [ВЕЧЕР] Будет отправлено {total_users} пользователям")
+
+    for user_id in users_to_send:
         try:
+            data = user_data_store[user_id]
+
+            # Проверяем онбординг для массовой рассылки
+            if not target_user_id and not data.get('onboarding_complete', False):
+                continue
+
             # Формируем только основное сообщение
             base_text = (
                 "Как проходит вечер? Давай поможем себе лечь пораньше.\n"
@@ -161,7 +226,7 @@ async def send_evening_message(context: ContextTypes.DEFAULT_TYPE):
                     "Не сейчас": "evening_not_now",
                 }
 
-            # Отправляем ТОЛЬКО ОСНОВНОЕ СООБЩЕНИЕ (без вопроса о чувствах)
+            # Отправляем ТОЛЬКО ОСНОВНОЕ СООБЩЕНИЕ
             main_success = await send_message_with_retry(context.bot, user_id, text, keyboard)
 
             if main_success:
@@ -169,17 +234,18 @@ async def send_evening_message(context: ContextTypes.DEFAULT_TYPE):
                 logger.info(f"✅ [ВЕЧЕР] Основное сообщение отправлено {user_id}")
 
                 # Проверяем историю настроений для дополнительной поддержки
-                mood_history = data.get('mood_history', [])
-                if len(mood_history) >= 5:
-                    trend = ai.analyze_mood_trend(mood_history)
-                    if trend['trend'] == 'worsening':
-                        # Если настроение ухудшается, отправим поддерживающее сообщение через минуту
-                        asyncio.create_task(send_support_message(context, user_id))
+                # (только для массовой рассылки)
+                if not target_user_id:
+                    mood_history = data.get('mood_history', [])
+                    if len(mood_history) >= 5:
+                        trend = ai.analyze_mood_trend(mood_history)
+                        if trend['trend'] == 'worsening':
+                            asyncio.create_task(send_support_message(context, user_id))
             else:
                 error_count += 1
                 logger.error(f"❌ [ВЕЧЕР] Не отправлено основное сообщение {user_id}")
 
-            await asyncio.sleep(0.5)  # Пауза между пользователями
+            await asyncio.sleep(0.5)
 
         except Exception as e:
             error_count += 1
@@ -187,32 +253,31 @@ async def send_evening_message(context: ContextTypes.DEFAULT_TYPE):
 
     elapsed_time = time.time() - start_time
     logger.info("=" * 60)
-    logger.info("📊 [ВЕЧЕР] ИТОГИ РАССЫЛКИ:")
-    logger.info(f"   👥 Всего пользователей с онбордингом: {total_users}")
-    logger.info(f"   ✅ Отправлено основных сообщений: {sent_count}")
-    logger.info(f"   ❌ Ошибок: {error_count}")
-    logger.info(f"   ⏱️ Время выполнения: {elapsed_time:.2f}с")
+
+    if target_user_id:
+        logger.info(
+            f"📊 [ВЕЧЕР] Тестовая рассылка для {target_user_id}: отправлено {sent_count}, ошибок {error_count}, время {elapsed_time:.2f}с"
+        )
+    else:
+        logger.info(
+            f"📊 [ВЕЧЕР] Массовая рассылка: отправлено {sent_count}/{total_users}, ошибок {error_count}, время {elapsed_time:.2f}с"
+        )
     logger.info("=" * 60)
 
 
-async def send_support_message(context: ContextTypes.DEFAULT_TYPE, user_id: str):
-    """Отправляет поддерживающее сообщение через минуту"""
-    await asyncio.sleep(60)
-    try:
-        advice = ai.generate_advice(user_context="Настроение ухудшается последние дни", situation='stress')
-        await context.bot.send_message(
-            chat_id=user_id, text=f"🌟 Заметил, что последнее время тебе тяжело.\n\n{advice}"
-        )
-        logger.info(f"✅ [ВЕЧЕР] Поддерживающее сообщение отправлено {user_id}")
-    except Exception as e:
-        logger.error(f"❌ [ВЕЧЕР] Ошибка отправки поддержки {user_id}: {e}")
-
-
-async def send_day_stress_message(context: ContextTypes.DEFAULT_TYPE):
-    """Отправляет дневное сообщение с контролем времени"""
+async def send_day_stress_message(context: ContextTypes.DEFAULT_TYPE, target_user_id: Optional[str] = None):
+    """
+    Отправляет дневное сообщение.
+    Если target_user_id указан - только этому пользователю,
+    иначе - всем пользователям со сценарием 'днём высокий стресс'.
+    """
     start_time = time.time()
     current_time = datetime.now().strftime('%H:%M:%S')
-    logger.info(f"📨 [ДЕНЬ] Начало рассылки в {current_time}")
+
+    if target_user_id:
+        logger.info(f"📨 [ДЕНЬ] Тестовая рассылка для пользователя {target_user_id} в {current_time}")
+    else:
+        logger.info(f"📨 [ДЕНЬ] Массовая рассылка в {current_time}")
 
     if not user_data_store:
         logger.warning("⚠️ [ДЕНЬ] Нет пользователей")
@@ -222,17 +287,45 @@ async def send_day_stress_message(context: ContextTypes.DEFAULT_TYPE):
     error_count = 0
     stress_users = 0
 
-    for user_id, data in user_data_store.items():
-        if not data.get('onboarding_complete', False):
-            continue
+    # Определяем список пользователей для рассылки
+    users_to_send = []
+    if target_user_id:
+        if target_user_id in user_data_store:
+            # Для теста отправляем даже если нет сценария стресса
+            users_to_send = [target_user_id]
+            logger.info(f"👤 [ДЕНЬ] Тестовый режим: отправка пользователю {target_user_id}")
+        else:
+            logger.error(f"❌ [ДЕНЬ] Пользователь {target_user_id} не найден")
+            return
+    else:
+        # Для массовой рассылки только со стрессом
+        for user_id, data in user_data_store.items():
+            if data.get('onboarding_complete', False) and 'днём высокий стресс' in data.get('scenario', []):
+                users_to_send.append(user_id)
+                stress_users += 1
 
-        has_stress = 'днём высокий стресс' in data.get('scenario', [])
-        if not has_stress:
-            continue
+    total_users = len(users_to_send)
+    if total_users == 0:
+        if target_user_id:
+            logger.warning(
+                f"⚠️ [ДЕНЬ] Пользователь {target_user_id} найден, но не отправлено (возможно, нет онбординга)"
+            )
+        else:
+            logger.warning("⚠️ [ДЕНЬ] Нет пользователей со стрессом")
+        return
 
-        stress_users += 1
+    logger.info(f"👥 [ДЕНЬ] Будет отправлено {total_users} пользователям")
 
+    for user_id in users_to_send:
         try:
+            data = user_data_store[user_id]
+
+            # Проверяем онбординг
+            if not data.get('onboarding_complete', False):
+                if target_user_id:
+                    logger.warning(f"⚠️ [ДЕНЬ] Пользователь {user_id} не прошёл онбординг")
+                continue
+
             stats = user_stats_store.get(user_id, {})
             day_streak = stats.get('day_stress_streak', 0)
             day_skip_streak = stats.get('day_stress_skip_streak', 0)
@@ -263,16 +356,35 @@ async def send_day_stress_message(context: ContextTypes.DEFAULT_TYPE):
                 error_count += 1
                 logger.error(f"❌ [ДЕНЬ] Не отправлено {user_id}")
 
-            await asyncio.sleep(0.3)  # Пауза между сообщениями
+            await asyncio.sleep(0.3)
 
         except Exception as e:
             error_count += 1
             logger.error(f"❌ [ДЕНЬ] Критическая ошибка для {user_id}: {e}")
 
     elapsed_time = time.time() - start_time
-    logger.info(
-        f"📊 [ДЕНЬ] Итог: стресс-пользователей {stress_users}, отправлено {sent_count}, ошибок {error_count}, время {elapsed_time:.2f}с"
-    )
+
+    if target_user_id:
+        logger.info(
+            f"📊 [ДЕНЬ] Тестовая рассылка для {target_user_id}: отправлено {sent_count}, ошибок {error_count}, время {elapsed_time:.2f}с"
+        )
+    else:
+        logger.info(
+            f"📊 [ДЕНЬ] Массовая рассылка: стресс-пользователей {stress_users}, отправлено {sent_count}, ошибок {error_count}, время {elapsed_time:.2f}с"
+        )
+
+
+async def send_support_message(context: ContextTypes.DEFAULT_TYPE, user_id: str):
+    """Отправляет поддерживающее сообщение через минуту"""
+    await asyncio.sleep(60)
+    try:
+        advice = ai.generate_advice(user_context="Настроение ухудшается последние дни", situation='stress')
+        await context.bot.send_message(
+            chat_id=user_id, text=f"🌟 Заметил, что последнее время тебе тяжело.\n\n{advice}"
+        )
+        logger.info(f"✅ [ВЕЧЕР] Поддерживающее сообщение отправлено {user_id}")
+    except Exception as e:
+        logger.error(f"❌ [ВЕЧЕР] Ошибка отправки поддержки {user_id}: {e}")
 
 
 # --- ПЛАНИРОВЩИК ЗАДАЧ ---
@@ -361,6 +473,7 @@ async def run_scheduler():
                 logger.info(f"Из них прошли онбординг: {onboarded}")
 
                 logger.info("=" * 50)
+
             # Проверка каждые 60 секунд
             await asyncio.sleep(60)
 
