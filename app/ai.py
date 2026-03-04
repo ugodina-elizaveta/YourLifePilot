@@ -41,7 +41,7 @@ class HuggingFaceAI:
             if self.token:
                 self.models['emotion'] = pipeline(
                     "text-classification",
-                    model="seara/rubert-tiny2-russian-emotion-detection",
+                    model="seara/rubert-tiny2-ru-go-emotions",
                     device=self.device,
                     token=self.token,  # Передаем токен для доступа
                 )
