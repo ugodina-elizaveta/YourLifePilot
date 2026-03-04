@@ -29,7 +29,7 @@ class HuggingFaceAI:
             logger.info("✅ Модель анализа тональности загружена")
 
             # 2. Модель для генерации текста (русский язык)
-            model_name = "sberbank-ai/rugpt3xl"  # или можно использовать "tinkoff-ai/ruDialoGPT-small"
+            model_name = "tinkoff-ai/ruDialoGPT-small"
 
             self.models['generation'] = pipeline(
                 "text-generation",
