@@ -1,4 +1,5 @@
 import logging
+import os
 import sys
 from datetime import datetime
 
@@ -157,3 +158,10 @@ async def trigger_day_webhook(user_id: str = None):
     except Exception as e:
         logger.error(f"Error in trigger-day: {e}")
         return {"ok": False, "error": str(e)}
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run("app.app:app", host="0.0.0.0", port=port, reload=False)
