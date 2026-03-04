@@ -1,9 +1,18 @@
+import asyncio
 import logging
 from datetime import datetime
 
 from telegram import Update
-from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes, ConversationHandler
+from telegram.ext import (
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    ConversationHandler,
+    MessageHandler,
+    filters,
+)
 
+from app.ai import ai
 from app.anketa import cancel, q1_handler, q2_handler, q3_handler, q4_handler, q5_handler
 from app.bot_app import bot_app
 from app.config import AGREEMENT, Q1, Q2, Q3, Q4, Q5, user_data_store, user_stats_store
@@ -17,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 async def morning_action_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка ответов на утреннее сообщение."""
+    """Обработка ответов на утреннее сообщение с AI-советами"""
     query = update.callback_query
     await query.answer()
     user_id = str(query.from_user.id)
@@ -31,10 +40,12 @@ async def morning_action_handler(update: Update, context: ContextTypes.DEFAULT_T
         await db.save_action(user_id, "morning", "normal")
 
     elif data == "morning_broken":
+        # AI генерирует утренний совет
+        advice = ai.generate_advice(user_context="Пользователь проснулся разбитым", situation='morning')
+
         if 'просыпаюсь разбитым' in user_data_store.get(user_id, {}).get('scenario', []):
             await query.edit_message_text(
-                "Жаль. Давай попробуем маленький шаг для бодрости:\n"
-                "Попробуй сейчас просто встать, подойти к окну и сделать 5 глубоких вдохов. Это займёт меньше минуты.",
+                f"Жаль. {advice}\n\n" "Попробуй сейчас просто встать, подойти к окну и сделать 5 глубоких вдохов.",
                 reply_markup=get_simple_keyboard(
                     {
                         "✅ Сделал(а)": "morning_micro_done",
@@ -45,7 +56,7 @@ async def morning_action_handler(update: Update, context: ContextTypes.DEFAULT_T
             await db.save_action(user_id, "morning", "broken_with_scenario")
             return
         else:
-            text = "Жаль. Если хочешь, можешь сделать пару глубоких вдохов, чтобы взбодриться."
+            text = f"Жаль. {advice}"
             await db.save_action(user_id, "morning", "broken_without_scenario")
 
     elif data == "morning_unknown":
@@ -93,7 +104,7 @@ async def evening_action_handler(update: Update, context: ContextTypes.DEFAULT_T
     today = datetime.now().date()
 
     text = None
-    
+
     if data == "evening_do":
         text = "Отлично! Маленький шаг запланирован."
         user_stats_store[user_id]['evening_streak'] = user_stats_store[user_id].get('evening_streak', 0) + 1
@@ -101,7 +112,7 @@ async def evening_action_handler(update: Update, context: ContextTypes.DEFAULT_T
         user_stats_store[user_id]['last_action_date']['evening'] = today
         await db.save_action(user_id, "evening", "do")
         await db.save_user_stats(user_id, user_stats_store[user_id])
-        
+
     elif data == "evening_not_now":
         text = "Хорошо, в другой раз. Главное — быть в контакте с собой."
         user_stats_store[user_id]['evening_skip_streak'] = user_stats_store[user_id].get('evening_skip_streak', 0) + 1
@@ -113,26 +124,28 @@ async def evening_action_handler(update: Update, context: ContextTypes.DEFAULT_T
     if text is not None:
         # Сначала отвечаем на callback
         await query.edit_message_text(text)
-        
+
         # Затем отправляем вопрос о самочувствии
         await query.message.reply_text(
             "И напоследок: как ты сейчас себя чувствуешь?",
-            reply_markup=get_simple_keyboard({
-                "🙂 Спокойно": "feeling_calm",
-                "😕 Напряжён(а)": "feeling_stressed",
-                "😔 Грустно": "feeling_sad",
-                "😩 Очень плохо": "feeling_bad",
-            }),
+            reply_markup=get_simple_keyboard(
+                {
+                    "🙂 Спокойно": "feeling_calm",
+                    "😕 Напряжён(а)": "feeling_stressed",
+                    "😔 Грустно": "feeling_sad",
+                    "😩 Очень плохо": "feeling_bad",
+                }
+            ),
         )
         logger.info(f"✅ [ВЕЧЕР] Вопрос о настроении отправлен {user_id} после ответа")
-    
+
     else:
         logger.error(f"Необработанный callback data: {data} для пользователя {user_id}")
         await query.edit_message_text("Что-то пошло не так. Попробуй еще раз.")
 
 
 async def feeling_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Сохраняем ответ о самочувствии."""
+    """Сохраняем ответ о самочувствии и даем AI-совет"""
     query = update.callback_query
     await query.answer()
     user_id = str(query.from_user.id)
@@ -153,11 +166,44 @@ async def feeling_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if 'mood_history' not in user_data_store[user_id]:
         user_data_store[user_id]['mood_history'] = []
 
-    user_data_store[user_id]['mood_history'].append({'date': datetime.now().isoformat(), 'feeling': feeling})
+    mood_entry = {'date': datetime.now().isoformat(), 'feeling': feeling}
+    user_data_store[user_id]['mood_history'].append(mood_entry)
 
     # Сохраняем в БД
     await db.save_mood(user_id, feeling)
     await db.save_action(user_id, "feeling", data)
+
+    # Анализируем через AI
+    sentiment = ai.analyze_sentiment(feeling)
+    emotion = ai.analyze_emotion(feeling)
+    logger.info(f"🤖 AI Анализ: {sentiment}, {emotion}")
+
+    # Получаем историю настроений
+    mood_history = user_data_store[user_id].get('mood_history', [])
+
+    # Если это уже 3-й ответ, анализируем тренд
+    if len(mood_history) >= 3:
+        trend = ai.analyze_mood_trend(mood_history)
+
+        # Отправляем анализ тренда (не чаще раза в день)
+        last_trend_date = context.user_data.get('last_trend_date')
+        today = datetime.now().date()
+
+        if last_trend_date != today:
+            await asyncio.sleep(1)  # Небольшая пауза перед доп. сообщением
+            await query.message.reply_text(f"📊 {trend['message']}\n" f"Средний уровень: {trend.get('average', '?')}/4")
+            context.user_data['last_trend_date'] = today
+
+    # Если настроение плохое, даем поддерживающий совет
+    if feeling in ['Напряжён(а)', 'Грустно', 'Очень плохо']:
+        advice = ai.generate_advice(
+            user_context=f"У пользователя настроение: {feeling}",
+            situation='stress' if feeling == 'Напряжён(а)' else 'sad',
+        )
+
+        # Отправляем совет с небольшой задержкой
+        await asyncio.sleep(1.5)
+        await query.message.reply_text(f"💡 {advice}")
 
     await query.edit_message_text(f"Спасибо, что поделился(лась). Записал: {feeling}")
 
@@ -195,6 +241,55 @@ async def day_stress_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     else:
         logger.error(f"Необработанный callback data: {data} для пользователя {user_id}")
         await query.edit_message_text("Что-то пошло не так. Попробуй еще раз.")
+
+
+async def ai_chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обычный чат с AI"""
+    user_message = update.message.text
+
+    # Проверяем, активирован ли режим чата
+    if not context.user_data.get('ai_chat_mode'):
+        return
+
+    # Показываем, что бот печатает
+    await context.bot.send_chat_action(chat_id=update.effective_user.id, action="typing")
+
+    # Получаем историю настроений пользователя
+    user_id = str(update.effective_user.id)
+    mood_history = user_data_store.get(user_id, {}).get('mood_history', [])
+
+    # Формируем контекст
+    mood_summary = ""
+    if mood_history:
+        last_mood = mood_history[-1]['feeling']
+        mood_summary = f"Пользователь недавно чувствовал {last_mood}. "
+
+    # Анализируем сообщение пользователя через AI
+    sentiment = ai.analyze_sentiment(user_message)
+    emotion = ai.analyze_emotion(user_message)
+    logger.info(f"🤖 AI Чат: сообщение '{user_message[:30]}...' - {sentiment}, {emotion}")
+
+    # Генерируем ответ
+    response = ai.generate_advice(user_context=mood_summary, situation='general')
+
+    await update.message.reply_text(response)
+
+
+async def start_ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Вход в режим AI-чата"""
+    context.user_data['ai_chat_mode'] = True
+    await update.message.reply_text(
+        "🤖 **Режим общения с AI активирован!**\n\n"
+        "Задавай любые вопросы, делись переживаниями или просто болтай.\n"
+        "Я постараюсь поддержать и помочь.\n\n"
+        "Напиши **/stop_ai** чтобы выйти из режима."
+    )
+
+
+async def stop_ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Выход из режима AI-чата"""
+    context.user_data['ai_chat_mode'] = False
+    await update.message.reply_text("👋 Режим AI чата завершен.\n" "Возвращайся ещё, когда захочешь поговорить!")
 
 
 # --- НАСТРОЙКА ОБРАБОТЧИКОВ ---
@@ -240,4 +335,9 @@ def setup_handlers():
     bot_app.add_handler(CommandHandler("trigger_evening", trigger_evening))
     bot_app.add_handler(CommandHandler("trigger_day", trigger_day))
 
-    logger.info("✅ Handlers configured")
+    # Добавляем AI-команды
+    bot_app.add_handler(CommandHandler("ai", start_ai_chat))
+    bot_app.add_handler(CommandHandler("stop_ai", stop_ai_chat))
+    bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ai_chat_handler))
+
+    logger.info("✅ Handlers configured (including AI)")

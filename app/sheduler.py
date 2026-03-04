@@ -5,6 +5,7 @@ from datetime import datetime
 
 from telegram.ext import ContextTypes
 
+from app.ai import ai
 from app.bot_app import bot_app
 from app.config import user_data_store, user_stats_store
 from app.menu import get_simple_keyboard
@@ -166,6 +167,14 @@ async def send_evening_message(context: ContextTypes.DEFAULT_TYPE):
             if main_success:
                 sent_count += 1
                 logger.info(f"✅ [ВЕЧЕР] Основное сообщение отправлено {user_id}")
+
+                # Проверяем историю настроений для дополнительной поддержки
+                mood_history = data.get('mood_history', [])
+                if len(mood_history) >= 5:
+                    trend = ai.analyze_mood_trend(mood_history)
+                    if trend['trend'] == 'worsening':
+                        # Если настроение ухудшается, отправим поддерживающее сообщение через минуту
+                        asyncio.create_task(send_support_message(context, user_id))
             else:
                 error_count += 1
                 logger.error(f"❌ [ВЕЧЕР] Не отправлено основное сообщение {user_id}")
@@ -184,6 +193,19 @@ async def send_evening_message(context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"   ❌ Ошибок: {error_count}")
     logger.info(f"   ⏱️ Время выполнения: {elapsed_time:.2f}с")
     logger.info("=" * 60)
+
+
+async def send_support_message(context: ContextTypes.DEFAULT_TYPE, user_id: str):
+    """Отправляет поддерживающее сообщение через минуту"""
+    await asyncio.sleep(60)
+    try:
+        advice = ai.generate_advice(user_context="Настроение ухудшается последние дни", situation='stress')
+        await context.bot.send_message(
+            chat_id=user_id, text=f"🌟 Заметил, что последнее время тебе тяжело.\n\n{advice}"
+        )
+        logger.info(f"✅ [ВЕЧЕР] Поддерживающее сообщение отправлено {user_id}")
+    except Exception as e:
+        logger.error(f"❌ [ВЕЧЕР] Ошибка отправки поддержки {user_id}: {e}")
 
 
 async def send_day_stress_message(context: ContextTypes.DEFAULT_TYPE):
