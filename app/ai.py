@@ -99,37 +99,23 @@ class HuggingFaceAI:
             return {'label': 'neutral', 'score': 0.5}
 
     def generate_advice(self, user_context: str, situation: str) -> str:
-        """Генерирует персонализированный совет"""
+        """Генерирует персонализированный совет (без диалогов)"""
         try:
             prompt = self._create_advice_prompt(user_context, situation)
 
-            # Параметры для генерации
-            generation_kwargs = {
-                'max_new_tokens': 60,
-                'temperature': 0.8,
-                'top_p': 0.9,
-                'repetition_penalty': 1.3,  # Сильный штраф за повторения
-                'do_sample': True,
-                'pad_token_id': 50256,
-                'eos_token_id': 50256,
-                'early_stopping': True,
-            }
-
-            # Генерируем ответ
-            result = self.models['generation'](prompt, **generation_kwargs)[0]['generated_text']
+            # Убираем все лишние параметры, оставляем минимум
+            result = self.models['generation'](
+                prompt, max_new_tokens=50, temperature=0.7, do_sample=True, pad_token_id=50256
+            )[0]['generated_text']
 
             # Убираем промпт из результата
             advice = result.replace(prompt, '').strip()
 
-            # Если ответ слишком длинный или пустой, используем fallback
-            if not advice or len(advice) < 10:
+            # Очищаем от мусора
+            if '@@' in advice or 'ПЕРВЫЙ' in advice or 'ВТОРОЙ' in advice:
                 return self._get_fallback_advice(situation)
 
-            # Обрезаем до нормальной длины
-            if len(advice) > 200:
-                advice = advice[:200] + "..."
-
-            return advice
+            return advice if advice else self._get_fallback_advice(situation)
 
         except Exception as e:
             logger.error(f"Ошибка генерации совета: {e}")
