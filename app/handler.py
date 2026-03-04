@@ -341,3 +341,33 @@ def setup_handlers():
     bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ai_chat_handler))
 
     logger.info("✅ Handlers configured (including AI)")
+# Добавьте после других обработчиков, перед logger.info
+
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показывает список доступных команд"""
+    help_text = """
+🤖 **YourLifePilot - Доступные команды**
+
+**Основные:**
+/start - Начать работу с ботом
+/cancel - Отменить текущий диалог
+
+**AI-помощник:**
+/ai - Войти в режим общения с AI
+/stop_ai - Выйти из режима AI
+
+**Статистика:**
+/stats - Моя статистика
+/mood_history - История настроения
+
+**Тестовые команды:**
+/trigger_morning - Тест утренней рассылки
+/trigger_evening - Тест вечерней рассылки
+/trigger_day - Тест дневной рассылки
+
+/help - Показать это сообщение
+    """
+    await update.message.reply_text(help_text, parse_mode='Markdown')
+
+bot_app.add_handler(CommandHandler("help", help_command))
