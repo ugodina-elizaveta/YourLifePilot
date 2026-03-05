@@ -1,5 +1,6 @@
 import logging
 import os
+import random
 
 # Hugging Face Transformers
 from transformers import pipeline, set_seed
@@ -28,19 +29,19 @@ class HuggingFaceAI:
             )
             logger.info("✅ Модель анализа тональности загружена")
 
-            # 2. Модель для генерации текста (русский язык)
-            model_name = "tinkoff-ai/ruDialoGPT-small"
+            # 2. Модель для генерации текста - используем другую, более подходящую!
+            # RussianNLP/rugpt3medium_summarization - обучена на суммаризацию, даёт связные тексты
+            model_name = "RussianNLP/rugpt3medium_summarization"
 
             self.models['generation'] = pipeline(
                 "text-generation",
                 model=model_name,
                 device=self.device,
-                max_new_tokens=50,  # Ограничиваем длину ответа
-                temperature=0.7,
-                top_p=0.9,
-                repetition_penalty=1.2,  # Штраф за повторения (ВАЖНО!)
+                max_new_tokens=60,
+                temperature=0.8,
                 do_sample=True,
-                pad_token_id=50256,
+                repetition_penalty=1.3,
+                top_p=0.9,
             )
             logger.info(f"✅ Модель генерации текста загружена: {model_name}")
 
@@ -101,38 +102,31 @@ class HuggingFaceAI:
     def generate_advice(self, user_context: str, situation: str) -> str:
         """Генерирует персонализированный совет"""
         try:
-            # Для диалоговой модели нужен правильный формат
             prompt = self._create_advice_prompt(user_context, situation)
-
-            # Форматируем промпт как сообщение пользователя
-            formatted_prompt = f"Пользователь: {prompt}\nПомощник:"
 
             # Генерируем ответ
             result = self.models['generation'](
-                formatted_prompt,
-                max_new_tokens=60,
-                temperature=0.8,
-                do_sample=True,
-                pad_token_id=50256,
-                top_p=0.9,
-                repetition_penalty=1.3,
-                early_stopping=True,
+                prompt, max_new_tokens=60, temperature=0.8, do_sample=True, repetition_penalty=1.3, top_p=0.9
             )[0]['generated_text']
 
-            # Извлекаем только ответ помощника
-            if 'Помощник:' in result:
-                advice = result.split('Помощник:')[-1].strip()
-            else:
-                advice = result.replace(formatted_prompt, '').strip()
+            # Убираем промпт из результата
+            advice = result.replace(prompt, '').strip()
 
-            # Проверяем на мусор
-            if not advice or len(advice) < 10 or any(x in advice for x in ['@@', 'ПЕРВЫЙ', 'ВТОРОЙ']):
+            # Проверяем качество ответа
+            if not advice or len(advice) < 15:
+                logger.warning(f"Слишком короткий ответ от модели: {advice}, использую fallback")
                 return self._get_fallback_advice(situation)
 
-            # Обрезаем, если слишком длинный
+            # Проверяем на мусор (диалоговые метки)
+            if any(x in advice for x in ['@@', 'ПЕРВЫЙ', 'ВТОРОЙ', 'ТРЕТИЙ', 'Пользователь:', 'Помощник:']):
+                logger.warning(f"Модель выдала диалоговый мусор, использую fallback")
+                return self._get_fallback_advice(situation)
+
+            # Если ответ слишком длинный, обрезаем
             if len(advice) > 200:
                 advice = advice[:200] + "..."
 
+            logger.info(f"✅ AI сгенерировал совет для ситуации '{situation}'")
             return advice
 
         except Exception as e:
