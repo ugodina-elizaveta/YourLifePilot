@@ -29,20 +29,16 @@ class HuggingFaceAI:
             )
             logger.info("✅ Модель анализа тональности загружена")
 
-            # 2. Модель для генерации текста - используем другую, более подходящую!
-            # RussianNLP/rugpt3medium_summarization - обучена на суммаризацию, даёт связные тексты
-            model_name = "RussianNLP/rugpt3medium_summarization"
+            # 2. Модель для генерации текста - ВОЗВРАЩАЕМСЯ К ДИАЛОГОВОЙ, НО С ПРАВИЛЬНЫМ ФОРМАТОМ
+            model_name = "tinkoff-ai/ruDialoGPT-small"
 
-            self.models['generation'] = pipeline(
-                "text-generation",
-                model=model_name,
-                device=self.device,
-                max_new_tokens=60,
-                temperature=0.8,
-                do_sample=True,
-                repetition_penalty=1.3,
-                top_p=0.9,
-            )
+            # Загружаем модель отдельно, чтобы контролировать параметры
+            from transformers import AutoTokenizer, AutoModelForCausalLM
+
+            tokenizer = AutoTokenizer.from_pretrained(model_name)
+            model = AutoModelForCausalLM.from_pretrained(model_name)
+
+            self.models['generation'] = {'model': model, 'tokenizer': tokenizer}
             logger.info(f"✅ Модель генерации текста загружена: {model_name}")
 
             # 3. Модель для классификации эмоций
@@ -104,29 +100,43 @@ class HuggingFaceAI:
         try:
             prompt = self._create_advice_prompt(user_context, situation)
 
-            # Генерируем ответ
-            result = self.models['generation'](
-                prompt, max_new_tokens=60, temperature=0.8, do_sample=True, repetition_penalty=1.3, top_p=0.9
-            )[0]['generated_text']
+            # Получаем модель и токенизатор
+            model_data = self.models['generation']
+            if isinstance(model_data, dict) and 'model' in model_data and 'tokenizer' in model_data:
+                model = model_data['model']
+                tokenizer = model_data['tokenizer']
 
-            # Убираем промпт из результата
-            advice = result.replace(prompt, '').strip()
+                # Токенизируем вход
+                inputs = tokenizer(prompt, return_tensors="pt")
 
-            # Проверяем качество ответа
-            if not advice or len(advice) < 15:
-                logger.warning(f"Слишком короткий ответ от модели: {advice}, использую fallback")
+                # Генерируем
+                outputs = model.generate(
+                    inputs.input_ids,
+                    max_new_tokens=50,
+                    temperature=0.8,
+                    do_sample=True,
+                    pad_token_id=tokenizer.eos_token_id,
+                )
+
+                # Декодируем
+                advice = tokenizer.decode(outputs[0], skip_special_tokens=True)
+
+                # Убираем промпт
+                advice = advice.replace(prompt, '').strip()
+            else:
+                # Если модель в формате pipeline
+                result = model_data(prompt, max_new_tokens=50, temperature=0.8, do_sample=True)[0]
+                advice = result['generated_text'].replace(prompt, '').strip()
+
+            # Проверяем качество
+            if not advice or len(advice) < 10:
                 return self._get_fallback_advice(situation)
 
-            # Проверяем на мусор (диалоговые метки)
-            if any(x in advice for x in ['@@', 'ПЕРВЫЙ', 'ВТОРОЙ', 'ТРЕТИЙ', 'Пользователь:', 'Помощник:']):
-                logger.warning(f"Модель выдала диалоговый мусор, использую fallback")
+            # Очищаем от мусора
+            if any(x in advice for x in ['@@', 'ПЕРВЫЙ', 'ВТОРОЙ', 'ТРЕТИЙ']):
                 return self._get_fallback_advice(situation)
 
-            # Если ответ слишком длинный, обрезаем
-            if len(advice) > 200:
-                advice = advice[:200] + "..."
-
-            logger.info(f"✅ AI сгенерировал совет для ситуации '{situation}'")
+            logger.info(f"✅ AI сгенерировал совет для ситуации '{situation}': {advice[:50]}...")
             return advice
 
         except Exception as e:
