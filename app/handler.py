@@ -145,7 +145,7 @@ async def evening_action_handler(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def feeling_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Сохраняем ответ о самочувствии и даем AI-совет"""
+    """Сохраняем ответ о самочувствии."""
     query = update.callback_query
     await query.answer()
     user_id = str(query.from_user.id)
@@ -166,14 +166,13 @@ async def feeling_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if 'mood_history' not in user_data_store[user_id]:
         user_data_store[user_id]['mood_history'] = []
 
-    mood_entry = {'date': datetime.now().isoformat(), 'feeling': feeling}
-    user_data_store[user_id]['mood_history'].append(mood_entry)
+    user_data_store[user_id]['mood_history'].append({'date': datetime.now().isoformat(), 'feeling': feeling})
 
     # Сохраняем в БД
     await db.save_mood(user_id, feeling)
     await db.save_action(user_id, "feeling", data)
 
-    # Анализируем через AI
+    # Анализируем через AI (YandexGPT уже работает!)
     sentiment = ai.analyze_sentiment(feeling)
     emotion = ai.analyze_emotion(feeling)
     logger.info(f"🤖 AI Анализ: {sentiment}, {emotion}")
@@ -185,16 +184,22 @@ async def feeling_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(mood_history) >= 3:
         trend = ai.analyze_mood_trend(mood_history)
 
-        # Отправляем анализ тренда (не чаще раза в день)
-        last_trend_date = context.user_data.get('last_trend_date')
-        today = datetime.now().date()
+        # Проверяем, что trend не None и содержит нужные ключи
+        if trend and isinstance(trend, dict) and 'message' in trend:
+            # Отправляем анализ тренда (не чаще раза в день)
+            last_trend_date = context.user_data.get('last_trend_date')
+            today = datetime.now().date()
 
-        if last_trend_date != today:
-            await asyncio.sleep(1)  # Небольшая пауза перед доп. сообщением
-            await query.message.reply_text(f"📊 {trend['message']}\n" f"Средний уровень: {trend.get('average', '?')}/4")
-            context.user_data['last_trend_date'] = today
+            if last_trend_date != today:
+                await asyncio.sleep(1)
+                await query.message.reply_text(
+                    f"📊 {trend['message']}\n" f"Средний уровень: {trend.get('average', '?')}/4"
+                )
+                context.user_data['last_trend_date'] = today
+        else:
+            logger.warning(f"⚠️ Некорректные данные тренда: {trend}")
 
-    # Если настроение плохое, даем поддерживающий совет
+    # Если настроение плохое, даем поддерживающий совет через YandexGPT
     if feeling in ['Напряжён(а)', 'Грустно', 'Очень плохо']:
         advice = ai.generate_advice(
             user_context=f"У пользователя настроение: {feeling}",
@@ -244,7 +249,7 @@ async def day_stress_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def ai_chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обычный чат с AI"""
+    """Обычный чат с AI - определяет тему сообщения и даёт релевантный ответ"""
     user_message = update.message.text
 
     # Проверяем, активирован ли режим чата
@@ -258,21 +263,47 @@ async def ai_chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     mood_history = user_data_store.get(user_id, {}).get('mood_history', [])
 
+    # Определяем ситуацию по тексту сообщения
+    situation = detect_situation_from_text(user_message)
+
     # Формируем контекст
     mood_summary = ""
     if mood_history:
         last_mood = mood_history[-1]['feeling']
-        mood_summary = f"Пользователь недавно чувствовал {last_mood}. "
+        mood_summary = f" (последнее настроение: {last_mood})"
 
-    # Анализируем сообщение пользователя через AI
-    sentiment = ai.analyze_sentiment(user_message)
-    emotion = ai.analyze_emotion(user_message)
-    logger.info(f"🤖 AI Чат: сообщение '{user_message[:30]}...' - {sentiment}, {emotion}")
+    logger.info(f"🤖 AI Чат: определена ситуация '{situation}' для сообщения")
 
-    # Генерируем ответ
-    response = ai.generate_advice(user_context=mood_summary, situation='general')
+    # Генерируем ответ с правильной ситуацией
+    response = ai.generate_advice(user_context=user_message + mood_summary, situation=situation)
 
     await update.message.reply_text(response)
+
+
+def detect_situation_from_text(text: str) -> str:
+    """Определяет ситуацию по тексту сообщения"""
+    text_lower = text.lower()
+
+    # Ключевые слова для разных ситуаций
+    stress_keywords = ['стресс', 'напряж', 'пережив', 'тревог', 'волну', 'нерв']
+    sleep_keywords = ['сон', 'спать', 'уснуть', 'просып', 'бессонниц', 'кровать', 'ночь']
+    sad_keywords = ['груст', 'печал', 'тоск', 'плохое настроение', 'депресс', 'унын']
+    morning_keywords = ['утро', 'проснул', 'начать день', 'бодр']
+    evening_keywords = ['вечер', 'расслабит', 'перед сном', 'успокоят']
+
+    # Проверяем по ключевым словам
+    if any(word in text_lower for word in stress_keywords):
+        return 'stress'
+    elif any(word in text_lower for word in sleep_keywords):
+        return 'sleep'
+    elif any(word in text_lower for word in sad_keywords):
+        return 'sad'
+    elif any(word in text_lower for word in morning_keywords):
+        return 'morning'
+    elif any(word in text_lower for word in evening_keywords):
+        return 'evening'
+    else:
+        return 'general'
 
 
 async def start_ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -341,7 +372,6 @@ def setup_handlers():
     bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ai_chat_handler))
 
     logger.info("✅ Handlers configured (including AI)")
-# Добавьте после других обработчиков, перед logger.info
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -369,5 +399,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /help - Показать это сообщение
     """
     await update.message.reply_text(help_text, parse_mode='Markdown')
+
 
 bot_app.add_handler(CommandHandler("help", help_command))
