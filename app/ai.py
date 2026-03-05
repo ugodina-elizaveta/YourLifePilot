@@ -1,200 +1,112 @@
 import logging
 import os
-import re
-
-
-from transformers import pipeline, set_seed
+import aiohttp
+import asyncio
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
 
-class HuggingFaceAI:
+class YandexGPTAI:
+    """Класс для работы с YandexGPT AI Studio API (специализированный)"""
+
     def __init__(self):
-        self.device = -1
-        self.models = {}
-        self.token = os.getenv("HF_TOKEN")
-        set_seed(42)
-        self.load_models()
+        self.api_key = os.getenv("YANDEX_API_KEY")
+        self.folder_id = os.getenv("YANDEX_FOLDER_ID")
 
-    def load_models(self):
-        try:
-            logger.info("🤖 Загрузка AI моделей...")
+        # URL из документации AI Studio
+        self.url = "https://llm.api.ai-studio.yandex.net/foundationModels/v1/completion"
 
-            # 1. Анализ тональности (лёгкая модель)
-            self.models['sentiment'] = pipeline(
-                "sentiment-analysis", model="blanchefort/rubert-base-cased-sentiment", device=self.device
-            )
-            logger.info("✅ Модель анализа тональности загружена")
+        self.requests_today = 0
+        self.last_reset = datetime.now().date()
 
-            # 2. Эмоции
-            if self.token:
-                self.models['emotion'] = pipeline(
-                    "text-classification",
-                    model="seara/rubert-tiny2-ru-go-emotions",
-                    device=self.device,
-                    token=self.token,
-                )
-                logger.info("✅ Модель определения эмоций загружена")
-            else:
-                logger.warning("⚠️ HF_TOKEN не найден, модель эмоций не загружена")
-                self.models['emotion'] = self._create_mock_emotion_model()
-
-            # 3. Генерация текста (попробуем другую модель)
-            try:
-                model_name = "ai-forever/rugpt3medium_based_on_gpt2"
-                self.models['generation'] = pipeline(
-                    "text-generation",
-                    model=model_name,
-                    device=self.device,
-                    max_new_tokens=100,
-                    temperature=0.7,
-                    do_sample=True,
-                    top_p=0.9,
-                    repetition_penalty=1.2,
-                    pad_token_id=50256,
-                    return_full_text=False,
-                )
-                logger.info(f"✅ Модель генерации загружена: {model_name}")
-            except Exception as e:
-                logger.error(f"❌ Не удалось загрузить модель: {e}")
-                self.models['generation'] = None
-
-        except Exception as e:
-            logger.error(f"❌ Ошибка загрузки моделей: {e}", exc_info=True)
-            self._load_fallback_models()
-
-    def _create_mock_emotion_model(self):
-        class MockEmotionModel:
-            def __call__(self, text):
-                return [{'label': 'neutral', 'score': 0.8}]
-
-        return MockEmotionModel()
-
-    def _load_fallback_models(self):
-        logger.warning("⚠️ Используются заглушки вместо реальных моделей")
-
-        class MockModel:
-            def __call__(self, text, **kwargs):
-                return [{'label': 'neutral', 'score': 0.8}]
-
-        self.models = {'sentiment': MockModel(), 'emotion': MockModel(), 'generation': MockModel()}
-
-    def analyze_sentiment(self, text: str) -> dict:
-        try:
-            result = self.models['sentiment'](text)[0]
-            return {'label': result['label'], 'score': round(result['score'], 3)}
-        except Exception as e:
-            logger.error(f"Ошибка анализа тональности: {e}")
-            return {'label': 'NEUTRAL', 'score': 0.5}
-
-    def analyze_emotion(self, text: str) -> dict:
-        try:
-            result = self.models['emotion'](text)[0]
-            return {'label': result['label'], 'score': round(result['score'], 3)}
-        except Exception as e:
-            logger.error(f"Ошибка определения эмоции: {e}")
-            return {'label': 'neutral', 'score': 0.5}
-
-    def generate_advice(self, user_context: str, situation: str) -> str:
-        """Генерирует совет с улучшенным промптом"""
-        try:
-            # Если модель не загрузилась, сразу fallback
-            if not self.models.get('generation'):
-                logger.warning("Модель генерации не загружена, использую fallback")
-                return self._get_fallback_advice(situation)
-
-            prompt = self._create_detailed_prompt(user_context, situation)
-            logger.info(f"🤖 Генерирую совет для '{situation}'")
-
-            result = self.models['generation'](prompt, max_new_tokens=100)[0]
-            raw_advice = result['generated_text'].strip()
-            logger.info(f"📝 Сырой ответ: {raw_advice[:100]}...")
-
-            # Постобработка
-            cleaned = self._clean_advice(raw_advice)
-
-            if cleaned and len(cleaned) > 20:
-                logger.info(f"✅ Совет: {cleaned}")
-                return cleaned
-            else:
-                logger.warning("Ответ слишком короткий, fallback")
-                return self._get_fallback_advice(situation)
-
-        except Exception as e:
-            logger.error(f"Ошибка генерации: {e}")
-            return self._get_fallback_advice(situation)
-
-    def _create_detailed_prompt(self, user_context: str, situation: str) -> str:
-        """Создаёт подробный промпт для модели"""
-        prompts = {
-            'stress': """
-                Человек испытывает стресс. Дай ему короткий, добрый и практический совет,
-                как успокоиться прямо сейчас. Напиши 2-3 предложения.
-                
-                Совет:""",
-            'sleep': """
-                Человек хочет улучшить свой сон. Посоветуй простые и эффективные способы,
-                как быстрее засыпать и лучше высыпаться. Напиши 2-3 предложения.
-                
-                Совет:""",
-            'sad': """
-                Человеку грустно. Поддержи его тёплыми словами, дай простой совет,
-                как поднять настроение. Напиши 2-3 предложения.
-                
-                Совет:""",
-            'morning': """
-                Человек только проснулся и хочет начать день бодро и позитивно.
-                Посоветуй простые утренние ритуалы для хорошего дня. Напиши 2-3 предложения.
-                
-                Совет:""",
-            'evening': """
-                Вечер, человек готовится ко сну. Посоветуй, как расслабиться после трудного дня
-                и подготовиться к здоровому сну. Напиши 2-3 предложения.
-                
-                Совет:""",
-            'general': """
-                Дай дружеский совет человеку, который обратился за поддержкой.
-                Ответ должен быть тёплым, коротким и полезным. Напиши 2-3 предложения.
-                
-                Совет:""",
+        self.situation_prompts = {
+            'stress': "Ты - дружелюбный помощник по психологическому здоровью. Дай короткий, тёплый совет человеку, который испытывает стресс. Ответ должен быть 2-3 предложения, на русском языке.",
+            'sleep': "Ты - дружелюбный помощник по сну. Посоветуй простые способы, как улучшить сон. Ответ должен быть 2-3 предложения, на русском языке.",
+            'sad': "Ты - поддерживающий друг. Поддержи человека, которому грустно, тёплыми словами. Ответ должен быть 2-3 предложения, на русском языке.",
+            'morning': "Ты - эксперт по утренним ритуалам. Дай совет, как начать день бодро и позитивно. Ответ должен быть 2-3 предложения, на русском языке.",
+            'evening': "Ты - эксперт по релаксации. Посоветуй, как расслабиться вечером перед сном. Ответ должен быть 2-3 предложения, на русском языке.",
+            'general': "Ты - дружелюбный помощник. Дай короткий, полезный совет человеку, который обратился за поддержкой. Ответ должен быть 2-3 предложения, на русском языке.",
         }
-        return prompts.get(situation, prompts['general'])
 
-    def _clean_advice(self, text: str) -> str:
-        """Очищает и форматирует ответ"""
-        # Убираем диалоговые метки
-        text = re.sub(r'@@|ПЕРВЫЙ|ВТОРОЙ|ТРЕТИЙ|Пользователь:|Помощник:', '', text)
-
-        # Убираем странные символы
-        text = re.sub(r'[^\w\s.,!?;:()\-]', ' ', text)
-
-        # Убираем лишние пробелы
-        text = re.sub(r'\s+', ' ', text).strip()
-
-        # Берём первые 2-3 предложения
-        sentences = re.split(r'(?<=[.!?])\s+', text)
-        if sentences:
-            text = ' '.join(sentences[:3])
-
-        # Обрезаем длину
-        if len(text) > 200:
-            text = text[:200] + '...'
-
-        return text
-
-    def _get_fallback_advice(self, situation: str) -> str:
-        """Запасные советы (уже хорошие)"""
-        fallback = {
+        self.fallback_advice = {
             'stress': "Попробуй сделать глубокий вдох на 4 счета, задержать дыхание на 4, выдохнуть на 6. Повтори 5 раз. Это помогает успокоиться.",
-            'sleep': "Постарайся лечь спать в одно и то же время. За час до сна убери телефон и почитай книгу.",
+            'sleep': "Постарайся ложиться спать в одно и то же время. За час до сна убери телефон и почитай книгу.",
             'sad': "Разреши себе погрустить немного. Это нормально. Помни, что плохие дни всегда проходят.",
             'morning': "Начни утро со стакана тёплой воды. Сделай лёгкую зарядку и улыбнись новому дню.",
             'evening': "Попробуй за час до сна убрать телефон и почитать книгу. Тёплый душ тоже помогает расслабиться.",
             'general': "Будь к себе добрее. Маленькие шаги каждый день приводят к большим изменениям.",
         }
-        return fallback.get(situation, fallback['general'])
+
+        logger.info("✅ YandexGPT AI (специализированный) инициализирован")
+
+    def _check_limit(self) -> bool:
+        today = datetime.now().date()
+        if today != self.last_reset:
+            self.requests_today = 0
+            self.last_reset = today
+        if self.requests_today >= 1000:
+            logger.warning("⚠️ Дневной лимит YandexGPT исчерпан (1000 запросов)")
+            return False
+        return True
+
+    async def generate_advice(self, user_context: str, situation: str) -> str:
+        if not self._check_limit():
+            return self.fallback_advice.get(situation, self.fallback_advice['general'])
+
+        if not self.api_key or not self.folder_id:
+            logger.error("❌ YANDEX_API_KEY или YANDEX_FOLDER_ID не настроены")
+            return self.fallback_advice.get(situation, self.fallback_advice['general'])
+
+        try:
+            system_prompt = self.situation_prompts.get(situation, self.situation_prompts['general'])
+            prompt = {
+                "modelUri": f"gpt://{self.folder_id}/yandexgpt-lite",
+                "completionOptions": {"stream": False, "temperature": 0.6, "maxTokens": 150},
+                "messages": [
+                    {"role": "system", "text": system_prompt},
+                    {"role": "user", "text": user_context if user_context else "Дай совет"},
+                ],
+            }
+
+            logger.info(f"🤖 Запрос к YandexGPT (спец. API) для ситуации '{situation}'")
+
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    self.url,
+                    headers={"Authorization": f"Api-Key {self.api_key}", "Content-Type": "application/json"},
+                    json=prompt,
+                    timeout=30,
+                ) as response:
+                    self.requests_today += 1
+                    logger.info(f"📊 Запросов сегодня: {self.requests_today}/1000")
+
+                    if response.status == 200:
+                        result = await response.json()
+                        advice = result['result']['alternatives'][0]['message']['text'].strip()
+                        logger.info(f"✅ YandexGPT ответил: {advice[:100]}...")
+                        return advice
+                    else:
+                        error_text = await response.text()
+                        logger.error(f"❌ Ошибка YandexGPT API: {response.status} - {error_text}")
+                        return self.fallback_advice.get(situation, self.fallback_advice['general'])
+
+        except asyncio.TimeoutError:
+            logger.error("❌ Таймаут при запросе к YandexGPT")
+            return self.fallback_advice.get(situation, self.fallback_advice['general'])
+        except Exception as e:
+            logger.error(f"❌ Неожиданная ошибка: {e}", exc_info=True)
+            return self.fallback_advice.get(situation, self.fallback_advice['general'])
+
+    # Заглушки для совместимости
+    def analyze_sentiment(self, text: str) -> dict:
+        return {'label': 'NEUTRAL', 'score': 0.5}
+
+    def analyze_emotion(self, text: str) -> dict:
+        return {'label': 'neutral', 'score': 0.5}
 
     def analyze_mood_trend(self, mood_history: list[dict]) -> dict:
+        """Анализирует тренд настроений (оставляем как было)"""
         if not mood_history or len(mood_history) < 3:
             return {'trend': 'insufficient_data', 'message': 'Нужно больше данных для анализа', 'average': 2.5}
 
@@ -237,4 +149,4 @@ class HuggingFaceAI:
 
 
 # Создаём экземпляр
-ai = HuggingFaceAI()
+ai = YandexGPTAI()
