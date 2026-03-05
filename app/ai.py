@@ -108,9 +108,46 @@ class YandexGPTAI:
         return {'label': 'neutral', 'score': 0.5}
 
     def analyze_mood_trend(self, mood_history: list[dict]) -> dict:
-        # ... (код функции analyze_mood_trend) ...
-        # Оставьте как было
-        pass
+        if not mood_history or len(mood_history) < 3:
+            return {'trend': 'insufficient_data', 'message': 'Нужно больше данных для анализа', 'average': 2.5}
+
+        mood_values = []
+        for entry in mood_history[-7:]:
+            feeling = entry.get('feeling', '')
+            if feeling == 'Спокойно':
+                mood_values.append(4)
+            elif feeling == 'Напряжён(а)':
+                mood_values.append(3)
+            elif feeling == 'Грустно':
+                mood_values.append(2)
+            elif feeling == 'Очень плохо':
+                mood_values.append(1)
+            else:
+                mood_values.append(2.5)
+
+        if len(mood_values) >= 3:
+            first_avg = sum(mood_values[:3]) / 3
+            last_avg = sum(mood_values[-3:]) / 3
+
+            if last_avg > first_avg + 0.5:
+                trend = 'improving'
+                message = "Твоё настроение улучшается! Так держать! 🌟"
+            elif last_avg < first_avg - 0.5:
+                trend = 'worsening'
+                message = "Последнее время тебе тяжело. Помни, что я рядом и всегда готов поддержать 🤗"
+            else:
+                trend = 'stable'
+                message = "Настроение стабильное. Это хороший знак!"
+
+            return {
+                'trend': trend,
+                'message': message,
+                'average': round(sum(mood_values) / len(mood_values), 2),
+                'trend_strength': round(last_avg - first_avg, 2),
+            }
+
+        return {'trend': 'stable', 'message': 'Продолжай в том же духе!', 'average': 2.5}
 
 
+# Создаём экземпляр
 ai = YandexGPTAI()
