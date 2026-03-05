@@ -2,46 +2,45 @@ import logging
 import os
 import random
 
-# Hugging Face Transformers
 from transformers import pipeline, set_seed
 
 logger = logging.getLogger(__name__)
 
 
 class HuggingFaceAI:
-    """Класс для работы с AI моделями через Hugging Face"""
-
     def __init__(self):
-        self.device = -1  # Используем CPU
+        self.device = -1
         self.models = {}
         self.token = os.getenv("HF_TOKEN")
-        set_seed(42)  # Для воспроизводимости
+        set_seed(42)
         self.load_models()
 
     def load_models(self):
-        """Загружает все необходимые модели"""
         try:
             logger.info("🤖 Загрузка AI моделей...")
 
-            # 1. Модель для анализа тональности (русский язык)
+            # 1. Анализ тональности
             self.models['sentiment'] = pipeline(
                 "sentiment-analysis", model="blanchefort/rubert-base-cased-sentiment", device=self.device
             )
             logger.info("✅ Модель анализа тональности загружена")
 
-            # 2. Модель для генерации текста - ВОЗВРАЩАЕМСЯ К ДИАЛОГОВОЙ, НО С ПРАВИЛЬНЫМ ФОРМАТОМ
-            model_name = "tinkoff-ai/ruDialoGPT-small"
+            # 2. Генерация текста (используем pipeline с return_full_text=False)
+            self.models['generation'] = pipeline(
+                "text-generation",
+                model="tinkoff-ai/ruDialoGPT-small",
+                device=self.device,
+                max_new_tokens=60,
+                temperature=0.8,
+                do_sample=True,
+                top_p=0.9,
+                repetition_penalty=1.2,
+                pad_token_id=50256,
+                return_full_text=False,  # ВАЖНО! Не возвращать промпт
+            )
+            logger.info("✅ Модель генерации текста загружена: tinkoff-ai/ruDialoGPT-small")
 
-            # Загружаем модель отдельно, чтобы контролировать параметры
-            from transformers import AutoTokenizer, AutoModelForCausalLM
-
-            tokenizer = AutoTokenizer.from_pretrained(model_name)
-            model = AutoModelForCausalLM.from_pretrained(model_name)
-
-            self.models['generation'] = {'model': model, 'tokenizer': tokenizer}
-            logger.info(f"✅ Модель генерации текста загружена: {model_name}")
-
-            # 3. Модель для классификации эмоций
+            # 3. Эмоции
             if self.token:
                 self.models['emotion'] = pipeline(
                     "text-classification",
@@ -55,12 +54,10 @@ class HuggingFaceAI:
                 self.models['emotion'] = self._create_mock_emotion_model()
 
         except Exception as e:
-            logger.error(f"❌ Ошибка загрузки моделей: {e}")
+            logger.error(f"❌ Ошибка загрузки моделей: {e}", exc_info=True)
             self._load_fallback_models()
 
     def _create_mock_emotion_model(self):
-        """Создает заглушку для модели эмоций"""
-
         class MockEmotionModel:
             def __call__(self, text):
                 return [{'label': 'neutral', 'score': 0.8}]
@@ -68,7 +65,6 @@ class HuggingFaceAI:
         return MockEmotionModel()
 
     def _load_fallback_models(self):
-        """Заглушки для тестирования если модели не загрузились"""
         logger.warning("⚠️ Используются заглушки вместо реальных моделей")
 
         class MockModel:
@@ -78,7 +74,6 @@ class HuggingFaceAI:
         self.models = {'sentiment': MockModel(), 'emotion': MockModel(), 'generation': MockModel()}
 
     def analyze_sentiment(self, text: str) -> dict:
-        """Анализирует тональность текста"""
         try:
             result = self.models['sentiment'](text)[0]
             return {'label': result['label'], 'score': round(result['score'], 3)}
@@ -87,7 +82,6 @@ class HuggingFaceAI:
             return {'label': 'NEUTRAL', 'score': 0.5}
 
     def analyze_emotion(self, text: str) -> dict:
-        """Определяет конкретную эмоцию"""
         try:
             result = self.models['emotion'](text)[0]
             return {'label': result['label'], 'score': round(result['score'], 3)}
@@ -96,55 +90,35 @@ class HuggingFaceAI:
             return {'label': 'neutral', 'score': 0.5}
 
     def generate_advice(self, user_context: str, situation: str) -> str:
-        """Генерирует персонализированный совет"""
+        """Генерирует совет с контролем качества и fallback"""
         try:
             prompt = self._create_advice_prompt(user_context, situation)
+            logger.info(f"🤖 Генерирую совет для ситуации '{situation}' с промптом: {prompt}")
 
-            # Получаем модель и токенизатор
-            model_data = self.models['generation']
-            if isinstance(model_data, dict) and 'model' in model_data and 'tokenizer' in model_data:
-                model = model_data['model']
-                tokenizer = model_data['tokenizer']
+            # Пытаемся получить ответ от модели
+            result = self.models['generation'](prompt, max_new_tokens=60)[0]
+            advice = result['generated_text'].strip()
 
-                # Токенизируем вход
-                inputs = tokenizer(prompt, return_tensors="pt")
+            # Логируем сырой ответ
+            logger.info(f"📝 Сырой ответ модели: {advice}")
 
-                # Генерируем
-                outputs = model.generate(
-                    inputs.input_ids,
-                    max_new_tokens=50,
-                    temperature=0.8,
-                    do_sample=True,
-                    pad_token_id=tokenizer.eos_token_id,
-                )
-
-                # Декодируем
-                advice = tokenizer.decode(outputs[0], skip_special_tokens=True)
-
-                # Убираем промпт
-                advice = advice.replace(prompt, '').strip()
-            else:
-                # Если модель в формате pipeline
-                result = model_data(prompt, max_new_tokens=50, temperature=0.8, do_sample=True)[0]
-                advice = result['generated_text'].replace(prompt, '').strip()
-
-            # Проверяем качество
-            if not advice or len(advice) < 10:
+            # Очистка от мусора
+            if any(x in advice for x in ['@@', 'ПЕРВЫЙ', 'ВТОРОЙ', 'ТРЕТИЙ', 'Пользователь:', 'Помощник:']):
+                logger.warning("Ответ содержит диалоговый мусор, использую fallback")
                 return self._get_fallback_advice(situation)
 
-            # Очищаем от мусора
-            if any(x in advice for x in ['@@', 'ПЕРВЫЙ', 'ВТОРОЙ', 'ТРЕТИЙ']):
+            if len(advice) < 10:
+                logger.warning("Слишком короткий ответ, использую fallback")
                 return self._get_fallback_advice(situation)
 
-            logger.info(f"✅ AI сгенерировал совет для ситуации '{situation}': {advice[:50]}...")
+            logger.info(f"✅ AI совет сгенерирован: {advice}")
             return advice
 
         except Exception as e:
-            logger.error(f"Ошибка генерации совета: {e}")
+            logger.error(f"Ошибка генерации совета: {e}", exc_info=True)
             return self._get_fallback_advice(situation)
 
     def _create_advice_prompt(self, user_context: str, situation: str) -> str:
-        """Создает промпт для генерации совета"""
         prompts = {
             'stress': "Дай короткий, добрый совет человеку, который испытывает стресс:",
             'sleep': "Посоветуй что-то простое для лучшего сна:",
@@ -156,7 +130,6 @@ class HuggingFaceAI:
         return prompts.get(situation, prompts['general'])
 
     def _get_fallback_advice(self, situation: str) -> str:
-        """Запасные советы если AI не работает"""
         fallback = {
             'stress': "Попробуй сделать глубокий вдох на 4 счета, задержать дыхание на 4, выдохнуть на 6. Повтори 5 раз. Это помогает успокоиться.",
             'sleep': "Постарайся лечь спать в одно и то же время. За час до сна убери телефон и почитай книгу.",
@@ -168,11 +141,9 @@ class HuggingFaceAI:
         return fallback.get(situation, fallback['general'])
 
     def analyze_mood_trend(self, mood_history: list[dict]) -> dict:
-        """Анализирует тренд настроений"""
         if not mood_history or len(mood_history) < 3:
             return {'trend': 'insufficient_data', 'message': 'Нужно больше данных для анализа', 'average': 2.5}
 
-        # Преобразуем эмоции в числа
         mood_values = []
         for entry in mood_history[-7:]:
             feeling = entry.get('feeling', '')
@@ -187,7 +158,6 @@ class HuggingFaceAI:
             else:
                 mood_values.append(2.5)
 
-        # Анализируем тренд
         if len(mood_values) >= 3:
             first_avg = sum(mood_values[:3]) / 3
             last_avg = sum(mood_values[-3:]) / 3
@@ -212,5 +182,4 @@ class HuggingFaceAI:
         return {'trend': 'stable', 'message': 'Продолжай в том же духе!', 'average': 2.5}
 
 
-# Создаем глобальный экземпляр
 ai = HuggingFaceAI()
