@@ -99,23 +99,41 @@ class HuggingFaceAI:
             return {'label': 'neutral', 'score': 0.5}
 
     def generate_advice(self, user_context: str, situation: str) -> str:
-        """Генерирует персонализированный совет (без диалогов)"""
+        """Генерирует персонализированный совет"""
         try:
+            # Для диалоговой модели нужен правильный формат
             prompt = self._create_advice_prompt(user_context, situation)
 
-            # Убираем все лишние параметры, оставляем минимум
+            # Форматируем промпт как сообщение пользователя
+            formatted_prompt = f"Пользователь: {prompt}\nПомощник:"
+
+            # Генерируем ответ
             result = self.models['generation'](
-                prompt, max_new_tokens=50, temperature=0.7, do_sample=True, pad_token_id=50256
+                formatted_prompt,
+                max_new_tokens=60,
+                temperature=0.8,
+                do_sample=True,
+                pad_token_id=50256,
+                top_p=0.9,
+                repetition_penalty=1.3,
+                early_stopping=True,
             )[0]['generated_text']
 
-            # Убираем промпт из результата
-            advice = result.replace(prompt, '').strip()
+            # Извлекаем только ответ помощника
+            if 'Помощник:' in result:
+                advice = result.split('Помощник:')[-1].strip()
+            else:
+                advice = result.replace(formatted_prompt, '').strip()
 
-            # Очищаем от мусора
-            if '@@' in advice or 'ПЕРВЫЙ' in advice or 'ВТОРОЙ' in advice:
+            # Проверяем на мусор
+            if not advice or len(advice) < 10 or any(x in advice for x in ['@@', 'ПЕРВЫЙ', 'ВТОРОЙ']):
                 return self._get_fallback_advice(situation)
 
-            return advice if advice else self._get_fallback_advice(situation)
+            # Обрезаем, если слишком длинный
+            if len(advice) > 200:
+                advice = advice[:200] + "..."
+
+            return advice
 
         except Exception as e:
             logger.error(f"Ошибка генерации совета: {e}")
