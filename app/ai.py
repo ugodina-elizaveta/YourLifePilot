@@ -1,6 +1,8 @@
 import logging
 import os
 import re
+import aiohttp
+import asyncio
 
 from transformers import pipeline, set_seed
 
@@ -19,29 +21,13 @@ class HuggingFaceAI:
         try:
             logger.info("🤖 Загрузка AI моделей...")
 
-            # 1. Анализ тональности
+            # 1. Анализ тональности (лёгкая модель)
             self.models['sentiment'] = pipeline(
                 "sentiment-analysis", model="blanchefort/rubert-base-cased-sentiment", device=self.device
             )
             logger.info("✅ Модель анализа тональности загружена")
 
-            # 2. ЛЁГКАЯ модель для генерации текста
-            model_name = "tinkoff-ai/ruDialoGPT-small"
-            self.models['generation'] = pipeline(
-                "text-generation",
-                model=model_name,
-                device=self.device,
-                max_new_tokens=50,
-                temperature=0.7,
-                do_sample=True,
-                top_p=0.9,
-                repetition_penalty=1.3,
-                pad_token_id=50256,
-                return_full_text=False,
-            )
-            logger.info(f"✅ Модель генерации текста загружена: {model_name}")
-
-            # 3. Эмоции
+            # 2. Эмоции
             if self.token:
                 self.models['emotion'] = pipeline(
                     "text-classification",
@@ -53,6 +39,26 @@ class HuggingFaceAI:
             else:
                 logger.warning("⚠️ HF_TOKEN не найден, модель эмоций не загружена")
                 self.models['emotion'] = self._create_mock_emotion_model()
+
+            # 3. Генерация текста (попробуем другую модель)
+            try:
+                model_name = "ai-forever/rugpt3medium_based_on_gpt2"
+                self.models['generation'] = pipeline(
+                    "text-generation",
+                    model=model_name,
+                    device=self.device,
+                    max_new_tokens=100,
+                    temperature=0.7,
+                    do_sample=True,
+                    top_p=0.9,
+                    repetition_penalty=1.2,
+                    pad_token_id=50256,
+                    return_full_text=False,
+                )
+                logger.info(f"✅ Модель генерации загружена: {model_name}")
+            except Exception as e:
+                logger.error(f"❌ Не удалось загрузить модель: {e}")
+                self.models['generation'] = None
 
         except Exception as e:
             logger.error(f"❌ Ошибка загрузки моделей: {e}", exc_info=True)
@@ -91,64 +97,85 @@ class HuggingFaceAI:
             return {'label': 'neutral', 'score': 0.5}
 
     def generate_advice(self, user_context: str, situation: str) -> str:
-        """Генерирует совет с жёсткой постобработкой"""
+        """Генерирует совет с улучшенным промптом"""
         try:
-            prompt = self._create_advice_prompt(user_context, situation)
-            logger.info(f"🤖 Генерирую совет для ситуации '{situation}'")
+            # Если модель не загрузилась, сразу fallback
+            if not self.models.get('generation'):
+                logger.warning("Модель генерации не загружена, использую fallback")
+                return self._get_fallback_advice(situation)
 
-            result = self.models['generation'](prompt, max_new_tokens=50)[0]
+            prompt = self._create_detailed_prompt(user_context, situation)
+            logger.info(f"🤖 Генерирую совет для '{situation}'")
+
+            result = self.models['generation'](prompt, max_new_tokens=100)[0]
             raw_advice = result['generated_text'].strip()
             logger.info(f"📝 Сырой ответ: {raw_advice[:100]}...")
 
-            # Жёсткая постобработка
+            # Постобработка
             cleaned = self._clean_advice(raw_advice)
 
-            # Если очищенный ответ слишком короткий или явно плохой - fallback
-            if not cleaned or len(cleaned) < 20:
-                logger.warning("Ответ после очистки слишком короткий, использую fallback")
+            if cleaned and len(cleaned) > 20:
+                logger.info(f"✅ Совет: {cleaned}")
+                return cleaned
+            else:
+                logger.warning("Ответ слишком короткий, fallback")
                 return self._get_fallback_advice(situation)
-
-            # Проверка на явный мусор (нецензурная лексика, бессмысленные символы)
-            if self._is_garbage(cleaned):
-                logger.warning("Ответ содержит мусор, использую fallback")
-                return self._get_fallback_advice(situation)
-
-            logger.info(f"✅ AI совет: {cleaned}")
-            return cleaned
 
         except Exception as e:
-            logger.error(f"Ошибка генерации совета: {e}", exc_info=True)
+            logger.error(f"Ошибка генерации: {e}")
             return self._get_fallback_advice(situation)
 
-    def _is_garbage(self, text: str) -> bool:
-        """Проверяет, является ли ответ мусором"""
-        # Слишком много символов, не являющихся буквами/цифрами
-        non_word_ratio = len(re.findall(r'[^\w\s.,!?;:()\-]', text)) / max(len(text), 1)
-        if non_word_ratio > 0.2:
-            return True
-
-        # Нецензурная лексика (простейшая проверка)
-        bad_words = ['хуй', 'пизд', 'бля', 'нах', 'ебат']
-        if any(word in text.lower() for word in bad_words):
-            return True
-
-        return False
+    def _create_detailed_prompt(self, user_context: str, situation: str) -> str:
+        """Создаёт подробный промпт для модели"""
+        prompts = {
+            'stress': """
+                Человек испытывает стресс. Дай ему короткий, добрый и практический совет,
+                как успокоиться прямо сейчас. Напиши 2-3 предложения.
+                
+                Совет:""",
+            'sleep': """
+                Человек хочет улучшить свой сон. Посоветуй простые и эффективные способы,
+                как быстрее засыпать и лучше высыпаться. Напиши 2-3 предложения.
+                
+                Совет:""",
+            'sad': """
+                Человеку грустно. Поддержи его тёплыми словами, дай простой совет,
+                как поднять настроение. Напиши 2-3 предложения.
+                
+                Совет:""",
+            'morning': """
+                Человек только проснулся и хочет начать день бодро и позитивно.
+                Посоветуй простые утренние ритуалы для хорошего дня. Напиши 2-3 предложения.
+                
+                Совет:""",
+            'evening': """
+                Вечер, человек готовится ко сну. Посоветуй, как расслабиться после трудного дня
+                и подготовиться к здоровому сну. Напиши 2-3 предложения.
+                
+                Совет:""",
+            'general': """
+                Дай дружеский совет человеку, который обратился за поддержкой.
+                Ответ должен быть тёплым, коротким и полезным. Напиши 2-3 предложения.
+                
+                Совет:""",
+        }
+        return prompts.get(situation, prompts['general'])
 
     def _clean_advice(self, text: str) -> str:
-        """Улучшенная очистка ответа"""
-        # Убираем метки диалогов
+        """Очищает и форматирует ответ"""
+        # Убираем диалоговые метки
         text = re.sub(r'@@|ПЕРВЫЙ|ВТОРОЙ|ТРЕТИЙ|Пользователь:|Помощник:', '', text)
 
-        # Убираем избыточные символы
+        # Убираем странные символы
         text = re.sub(r'[^\w\s.,!?;:()\-]', ' ', text)
 
         # Убираем лишние пробелы
         text = re.sub(r'\s+', ' ', text).strip()
 
-        # Берём первые 2 предложения
+        # Берём первые 2-3 предложения
         sentences = re.split(r'(?<=[.!?])\s+', text)
         if sentences:
-            text = ' '.join(sentences[:2])
+            text = ' '.join(sentences[:3])
 
         # Обрезаем длину
         if len(text) > 200:
@@ -156,18 +183,8 @@ class HuggingFaceAI:
 
         return text
 
-    def _create_advice_prompt(self, user_context: str, situation: str) -> str:
-        prompts = {
-            'stress': "Пользователь испытывает стресс. Дай короткий, добрый совет:",
-            'sleep': "Пользователь хочет лучше спать. Посоветуй что-то простое:",
-            'sad': "Пользователь грустит. Поддержи тёплыми словами:",
-            'morning': "Пользователь просыпается. Дай совет как начать день бодро:",
-            'evening': "Пользователь готовится ко сну. Посоветуй как расслабиться:",
-            'general': "Дай дружеский совет:",
-        }
-        return prompts.get(situation, prompts['general'])
-
     def _get_fallback_advice(self, situation: str) -> str:
+        """Запасные советы (уже хорошие)"""
         fallback = {
             'stress': "Попробуй сделать глубокий вдох на 4 счета, задержать дыхание на 4, выдохнуть на 6. Повтори 5 раз. Это помогает успокоиться.",
             'sleep': "Постарайся лечь спать в одно и то же время. За час до сна убери телефон и почитай книгу.",
@@ -220,4 +237,5 @@ class HuggingFaceAI:
         return {'trend': 'stable', 'message': 'Продолжай в том же духе!', 'average': 2.5}
 
 
+# Создаём экземпляр
 ai = HuggingFaceAI()
