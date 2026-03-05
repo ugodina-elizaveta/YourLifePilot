@@ -66,7 +66,7 @@ class YandexGPTAI:
             # Формируем запрос для Yandex Cloud API
             payload = {
                 "modelUri": f"gpt://{self.folder_id}/yandexgpt-lite",
-                "completionOptions": {"stream": False, "temperature": 0.6, "maxTokens": 150},
+                "completionOptions": {"stream": False, "temperature": 0.8, "maxTokens": 150},
                 "messages": [{"role": "system", "text": system_prompt}, {"role": "user", "text": user_prompt}],
             }
 
@@ -93,48 +93,11 @@ class YandexGPTAI:
 
         except requests.exceptions.ConnectionError as e:
             logger.error(f"❌ Ошибка подключения: {e}")
-            # Пробуем альтернативный URL
-            return self._try_alternative_url(user_context, situation)
         except requests.Timeout:
             logger.error("❌ Таймаут при запросе к YandexGPT")
             return self.fallback_advice.get(situation, self.fallback_advice['general'])
         except Exception as e:
             logger.error(f"❌ Неожиданная ошибка: {e}", exc_info=True)
-            return self.fallback_advice.get(situation, self.fallback_advice['general'])
-
-    def _try_alternative_url(self, user_context: str, situation: str) -> str:
-        """Пробует альтернативный URL если основной не работает"""
-        try:
-            alt_url = "https://llm.api.ai-studio.yandex.net/foundationModels/v1/completion"
-            logger.info(f"🔄 Пробую альтернативный URL: {alt_url}")
-
-            system_prompt = self.situation_prompts.get(situation, self.situation_prompts['general'])
-            user_prompt = user_context if user_context else "Дай совет"
-
-            payload = {
-                "modelUri": f"gpt://{self.folder_id}/yandexgpt-lite",
-                "completionOptions": {"stream": False, "temperature": 0.6, "maxTokens": 150},
-                "messages": [{"role": "system", "text": system_prompt}, {"role": "user", "text": user_prompt}],
-            }
-
-            response = requests.post(
-                alt_url,
-                headers={"Authorization": f"Api-Key {self.api_key}", "Content-Type": "application/json"},
-                json=payload,
-                timeout=30,
-            )
-
-            if response.status_code == 200:
-                result = response.json()
-                advice = result['result']['alternatives'][0]['message']['text'].strip()
-                logger.info(f"✅ Альтернативный URL сработал: {advice[:100]}...")
-                return advice
-            else:
-                logger.error(f"❌ Альтернативный URL тоже не работает: {response.status_code}")
-                return self.fallback_advice.get(situation, self.fallback_advice['general'])
-
-        except Exception as e:
-            logger.error(f"❌ Альтернативный URL тоже не работает: {e}")
             return self.fallback_advice.get(situation, self.fallback_advice['general'])
 
     # Заглушки для совместимости
