@@ -25,17 +25,17 @@ class HuggingFaceAI:
             )
             logger.info("✅ Модель анализа тональности загружена")
 
-            # 2. Генерация текста - новая модель
-            model_name = "ai-forever/rugpt3medium_based_on_gpt2"
+            # 2. ЛЁГКАЯ модель для генерации текста
+            model_name = "tinkoff-ai/ruDialoGPT-small"
             self.models['generation'] = pipeline(
                 "text-generation",
                 model=model_name,
                 device=self.device,
-                max_new_tokens=60,
-                temperature=0.8,
+                max_new_tokens=50,
+                temperature=0.7,
                 do_sample=True,
                 top_p=0.9,
-                repetition_penalty=1.2,
+                repetition_penalty=1.3,
                 pad_token_id=50256,
                 return_full_text=False,
             )
@@ -91,50 +91,78 @@ class HuggingFaceAI:
             return {'label': 'neutral', 'score': 0.5}
 
     def generate_advice(self, user_context: str, situation: str) -> str:
-        """Генерирует совет с постобработкой и fallback"""
+        """Генерирует совет с жёсткой постобработкой"""
         try:
             prompt = self._create_advice_prompt(user_context, situation)
-            logger.info(f"🤖 Генерирую совет для ситуации '{situation}' с промптом: {prompt}")
+            logger.info(f"🤖 Генерирую совет для ситуации '{situation}'")
 
-            result = self.models['generation'](prompt, max_new_tokens=60)[0]
+            result = self.models['generation'](prompt, max_new_tokens=50)[0]
             raw_advice = result['generated_text'].strip()
-            logger.info(f"📝 Сырой ответ модели: {raw_advice}")
+            logger.info(f"📝 Сырой ответ: {raw_advice[:100]}...")
 
-            # Постобработка
+            # Жёсткая постобработка
             cleaned = self._clean_advice(raw_advice)
-            if cleaned and len(cleaned) >= 15:
-                logger.info(f"✅ AI совет после очистки: {cleaned}")
-                return cleaned
-            else:
-                logger.warning("Ответ после очистки слишком короткий или пустой, использую fallback")
+
+            # Если очищенный ответ слишком короткий или явно плохой - fallback
+            if not cleaned or len(cleaned) < 20:
+                logger.warning("Ответ после очистки слишком короткий, использую fallback")
                 return self._get_fallback_advice(situation)
+
+            # Проверка на явный мусор (нецензурная лексика, бессмысленные символы)
+            if self._is_garbage(cleaned):
+                logger.warning("Ответ содержит мусор, использую fallback")
+                return self._get_fallback_advice(situation)
+
+            logger.info(f"✅ AI совет: {cleaned}")
+            return cleaned
 
         except Exception as e:
             logger.error(f"Ошибка генерации совета: {e}", exc_info=True)
             return self._get_fallback_advice(situation)
 
+    def _is_garbage(self, text: str) -> bool:
+        """Проверяет, является ли ответ мусором"""
+        # Слишком много символов, не являющихся буквами/цифрами
+        non_word_ratio = len(re.findall(r'[^\w\s.,!?;:()\-]', text)) / max(len(text), 1)
+        if non_word_ratio > 0.2:
+            return True
+
+        # Нецензурная лексика (простейшая проверка)
+        bad_words = ['хуй', 'пизд', 'бля', 'нах', 'ебат']
+        if any(word in text.lower() for word in bad_words):
+            return True
+
+        return False
+
     def _clean_advice(self, text: str) -> str:
-        """Удаляет мусор, оставляет первое предложение."""
+        """Улучшенная очистка ответа"""
         # Убираем метки диалогов
         text = re.sub(r'@@|ПЕРВЫЙ|ВТОРОЙ|ТРЕТИЙ|Пользователь:|Помощник:', '', text)
+
+        # Убираем избыточные символы
+        text = re.sub(r'[^\w\s.,!?;:()\-]', ' ', text)
+
         # Убираем лишние пробелы
         text = re.sub(r'\s+', ' ', text).strip()
-        # Убираем явно нежелательные символы (оставляем буквы, цифры, знаки препинания)
-        text = re.sub(r'[^\w\s.,!?;:\-]', '', text)
-        # Берём первое предложение (до .!?)
-        sentences = re.split(r'[.!?]+', text)
-        first = sentences[0].strip() if sentences else ''
-        if len(first) < 15 and len(sentences) > 1:
-            first = (sentences[0] + '. ' + sentences[1]).strip()
-        return first
+
+        # Берём первые 2 предложения
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        if sentences:
+            text = ' '.join(sentences[:2])
+
+        # Обрезаем длину
+        if len(text) > 200:
+            text = text[:200] + '...'
+
+        return text
 
     def _create_advice_prompt(self, user_context: str, situation: str) -> str:
         prompts = {
-            'stress': "Дай короткий, добрый совет человеку, который испытывает стресс:",
-            'sleep': "Посоветуй что-то простое для лучшего сна:",
-            'sad': "Поддержи человека, который грустит, тёплыми словами:",
-            'morning': "Дай совет как начать день бодро и позитивно:",
-            'evening': "Посоветуй как расслабиться перед сном:",
+            'stress': "Пользователь испытывает стресс. Дай короткий, добрый совет:",
+            'sleep': "Пользователь хочет лучше спать. Посоветуй что-то простое:",
+            'sad': "Пользователь грустит. Поддержи тёплыми словами:",
+            'morning': "Пользователь просыпается. Дай совет как начать день бодро:",
+            'evening': "Пользователь готовится ко сну. Посоветуй как расслабиться:",
             'general': "Дай дружеский совет:",
         }
         return prompts.get(situation, prompts['general'])
