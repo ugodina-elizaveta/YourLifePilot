@@ -25,20 +25,21 @@ class HuggingFaceAI:
             )
             logger.info("✅ Модель анализа тональности загружена")
 
-            # 2. Генерация текста (диалоговая модель)
+            # 2. Генерация текста - новая модель
+            model_name = "ai-forever/rugpt3medium_based_on_gpt2"
             self.models['generation'] = pipeline(
                 "text-generation",
-                model="tinkoff-ai/ruDialoGPT-small",
+                model=model_name,
                 device=self.device,
                 max_new_tokens=60,
-                temperature=0.7,  # чуть ниже для более предсказуемых ответов
+                temperature=0.8,
                 do_sample=True,
                 top_p=0.9,
-                repetition_penalty=1.5,  # увеличиваем штраф за повторы
+                repetition_penalty=1.2,
                 pad_token_id=50256,
                 return_full_text=False,
             )
-            logger.info("✅ Модель генерации текста загружена: tinkoff-ai/ruDialoGPT-small")
+            logger.info(f"✅ Модель генерации текста загружена: {model_name}")
 
             # 3. Эмоции
             if self.token:
@@ -99,7 +100,7 @@ class HuggingFaceAI:
             raw_advice = result['generated_text'].strip()
             logger.info(f"📝 Сырой ответ модели: {raw_advice}")
 
-            # Постобработка: очистка от мусора и выделение первого предложения
+            # Постобработка
             cleaned = self._clean_advice(raw_advice)
             if cleaned and len(cleaned) >= 15:
                 logger.info(f"✅ AI совет после очистки: {cleaned}")
@@ -113,18 +114,17 @@ class HuggingFaceAI:
             return self._get_fallback_advice(situation)
 
     def _clean_advice(self, text: str) -> str:
-        """Удаляет диалоговые метки, смайлики, обрезает до первого предложения."""
-        # Убираем метки диалогов (ПЕРВЫЙ, ВТОРОЙ, @@)
-        text = re.sub(r'@@|ПЕРВЫЙ|ВТОРОЙ|ТРЕТИЙ', '', text)
+        """Удаляет мусор, оставляет первое предложение."""
+        # Убираем метки диалогов
+        text = re.sub(r'@@|ПЕРВЫЙ|ВТОРОЙ|ТРЕТИЙ|Пользователь:|Помощник:', '', text)
         # Убираем лишние пробелы
         text = re.sub(r'\s+', ' ', text).strip()
-        # Убираем смайлики (простейший вариант – удалить всё, что не буквы/цифры/пунктуация)
-        # Пока оставим как есть, можно добавить более сложную фильтрацию при необходимости
-        # Берём первое предложение (до точки, восклицательного или вопросительного знака)
+        # Убираем явно нежелательные символы (оставляем буквы, цифры, знаки препинания)
+        text = re.sub(r'[^\w\s.,!?;:\-]', '', text)
+        # Берём первое предложение (до .!?)
         sentences = re.split(r'[.!?]+', text)
         first = sentences[0].strip() if sentences else ''
         if len(first) < 15 and len(sentences) > 1:
-            # Если первое слишком короткое, берём первые два предложения
             first = (sentences[0] + '. ' + sentences[1]).strip()
         return first
 
