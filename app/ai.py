@@ -1,6 +1,6 @@
 import logging
 import os
-import random
+import re
 
 from transformers import pipeline, set_seed
 
@@ -25,18 +25,18 @@ class HuggingFaceAI:
             )
             logger.info("✅ Модель анализа тональности загружена")
 
-            # 2. Генерация текста (используем pipeline с return_full_text=False)
+            # 2. Генерация текста (диалоговая модель)
             self.models['generation'] = pipeline(
                 "text-generation",
                 model="tinkoff-ai/ruDialoGPT-small",
                 device=self.device,
                 max_new_tokens=60,
-                temperature=0.8,
+                temperature=0.7,  # чуть ниже для более предсказуемых ответов
                 do_sample=True,
                 top_p=0.9,
-                repetition_penalty=1.2,
+                repetition_penalty=1.5,  # увеличиваем штраф за повторы
                 pad_token_id=50256,
-                return_full_text=False,  # ВАЖНО! Не возвращать промпт
+                return_full_text=False,
             )
             logger.info("✅ Модель генерации текста загружена: tinkoff-ai/ruDialoGPT-small")
 
@@ -90,33 +90,43 @@ class HuggingFaceAI:
             return {'label': 'neutral', 'score': 0.5}
 
     def generate_advice(self, user_context: str, situation: str) -> str:
-        """Генерирует совет с контролем качества и fallback"""
+        """Генерирует совет с постобработкой и fallback"""
         try:
             prompt = self._create_advice_prompt(user_context, situation)
             logger.info(f"🤖 Генерирую совет для ситуации '{situation}' с промптом: {prompt}")
 
-            # Пытаемся получить ответ от модели
             result = self.models['generation'](prompt, max_new_tokens=60)[0]
-            advice = result['generated_text'].strip()
+            raw_advice = result['generated_text'].strip()
+            logger.info(f"📝 Сырой ответ модели: {raw_advice}")
 
-            # Логируем сырой ответ
-            logger.info(f"📝 Сырой ответ модели: {advice}")
-
-            # Очистка от мусора
-            if any(x in advice for x in ['@@', 'ПЕРВЫЙ', 'ВТОРОЙ', 'ТРЕТИЙ', 'Пользователь:', 'Помощник:']):
-                logger.warning("Ответ содержит диалоговый мусор, использую fallback")
+            # Постобработка: очистка от мусора и выделение первого предложения
+            cleaned = self._clean_advice(raw_advice)
+            if cleaned and len(cleaned) >= 15:
+                logger.info(f"✅ AI совет после очистки: {cleaned}")
+                return cleaned
+            else:
+                logger.warning("Ответ после очистки слишком короткий или пустой, использую fallback")
                 return self._get_fallback_advice(situation)
-
-            if len(advice) < 10:
-                logger.warning("Слишком короткий ответ, использую fallback")
-                return self._get_fallback_advice(situation)
-
-            logger.info(f"✅ AI совет сгенерирован: {advice}")
-            return advice
 
         except Exception as e:
             logger.error(f"Ошибка генерации совета: {e}", exc_info=True)
             return self._get_fallback_advice(situation)
+
+    def _clean_advice(self, text: str) -> str:
+        """Удаляет диалоговые метки, смайлики, обрезает до первого предложения."""
+        # Убираем метки диалогов (ПЕРВЫЙ, ВТОРОЙ, @@)
+        text = re.sub(r'@@|ПЕРВЫЙ|ВТОРОЙ|ТРЕТИЙ', '', text)
+        # Убираем лишние пробелы
+        text = re.sub(r'\s+', ' ', text).strip()
+        # Убираем смайлики (простейший вариант – удалить всё, что не буквы/цифры/пунктуация)
+        # Пока оставим как есть, можно добавить более сложную фильтрацию при необходимости
+        # Берём первое предложение (до точки, восклицательного или вопросительного знака)
+        sentences = re.split(r'[.!?]+', text)
+        first = sentences[0].strip() if sentences else ''
+        if len(first) < 15 and len(sentences) > 1:
+            # Если первое слишком короткое, берём первые два предложения
+            first = (sentences[0] + '. ' + sentences[1]).strip()
+        return first
 
     def _create_advice_prompt(self, user_context: str, situation: str) -> str:
         prompts = {
