@@ -1,8 +1,7 @@
 import logging
 import os
 import re
-import aiohttp
-import asyncio
+
 
 from transformers import pipeline, set_seed
 
