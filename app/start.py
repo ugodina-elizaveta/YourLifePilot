@@ -40,21 +40,40 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     db_user = await db.get_user(user_id)
 
     if db_user:
-        # Загружаем из БД в кэш
+        # Загружаем из БД в кэш с правильной обработкой JSON
+        scenario_data = db_user['scenario']
+        answers_data = db_user['answers']
+
+        # ✅ ИСПРАВЛЕНИЕ: преобразуем строку в список если нужно
+        if isinstance(scenario_data, str):
+            import json
+
+            try:
+                scenario_data = json.loads(scenario_data)
+            except:
+                scenario_data = []
+
+        if isinstance(answers_data, str):
+            import json
+
+            try:
+                answers_data = json.loads(answers_data)
+            except:
+                answers_data = {}
+
         user_data_store[user_id] = {
             'username': db_user['username'],
             'first_name': db_user['first_name'],
             'last_name': db_user['last_name'],
             'onboarding_complete': db_user['onboarding_complete'],
-            'scenario': db_user['scenario'],
-            'answers': db_user['answers'] if isinstance(db_user['answers'], dict) else {},
+            'scenario': scenario_data if isinstance(scenario_data, list) else [],
+            'answers': answers_data if isinstance(answers_data, dict) else {},
             'age_group': db_user.get('age_group'),
             'occupation': db_user.get('occupation'),
             'morning_time': db_user.get('morning_time', '09:00'),
             'evening_time': db_user.get('evening_time', '21:00'),
             'mood_history': [],
         }
-
         # Загружаем статистику
         stats = await db.get_user_stats(user_id)
         if stats:

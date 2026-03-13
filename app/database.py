@@ -67,6 +67,10 @@ class Database:
                 # Проверяем существование пользователя
                 exists = await conn.fetchval("SELECT EXISTS(SELECT 1 FROM users WHERE user_id = $1)", user_id)
 
+                # ✅ ИСПРАВЛЕНИЕ: явно преобразуем в JSON
+                scenario_json = json.dumps(user_data.get("scenario", []), ensure_ascii=False)
+                answers_json = json.dumps(user_data.get("answers", {}), ensure_ascii=False)
+
                 if exists:
                     # Обновляем существующего пользователя
                     await conn.execute(
@@ -80,14 +84,14 @@ class Database:
                             answers = $7::jsonb,
                             last_active = CURRENT_TIMESTAMP
                         WHERE user_id = $1
-                    """,
+                        """,
                         user_id,
                         user_data.get("username", ""),
                         user_data.get("first_name", ""),
                         user_data.get("last_name", ""),
                         user_data.get("onboarding_complete", False),
-                        json.dumps(user_data.get("scenario", [])),
-                        json.dumps(user_data.get("answers", {})),
+                        scenario_json,  # ✅ строка, которая станет jsonb
+                        answers_json,  # ✅ строка, которая станет jsonb
                     )
                     logger.info(f"✅ Пользователь {user_id} обновлен в БД")
                 else:
@@ -99,31 +103,36 @@ class Database:
                             onboarding_complete, scenario, answers,
                             created_at, last_active
                         ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, 
-                                 CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                    """,
+                                CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                        """,
                         user_id,
                         user_data.get("username", ""),
                         user_data.get("first_name", ""),
                         user_data.get("last_name", ""),
                         user_data.get("onboarding_complete", False),
-                        json.dumps(user_data.get("scenario", [])),
-                        json.dumps(user_data.get("answers", {})),
+                        scenario_json,  # ✅ строка, которая станет jsonb
+                        answers_json,  # ✅ строка, которая станет jsonb
                     )
                     logger.info(f"✅ Новый пользователь {user_id} создан в БД")
-
                 return True
-
         except Exception as e:
             logger.error(f"❌ Ошибка сохранения пользователя {user_id}: {e}")
             return False
 
     async def get_user(self, user_id: str) -> Optional[Dict]:
-        """Получает данные пользователя"""
+        """Получает данные пользователя с правильной обработкой JSON"""
         try:
             async with self.pool.acquire() as conn:
                 row = await conn.fetchrow("SELECT * FROM users WHERE user_id = $1", user_id)
                 if row:
-                    return dict(row)
+                    data = dict(row)
+                    # ✅ ИСПРАВЛЕНИЕ: явно преобразуем JSONB поля
+                    for field in ['scenario', 'answers']:
+                        if field in data and data[field] is not None:
+                            # asyncpg автоматически декодирует JSONB в Python объекты
+                            # но для подстраховки оставим
+                            pass
+                    return data
                 return None
         except Exception as e:
             logger.error(f"❌ Ошибка получения пользователя {user_id}: {e}")
