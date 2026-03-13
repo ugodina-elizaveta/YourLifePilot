@@ -1,5 +1,5 @@
 import os
-from typing import Any, Dict
+from typing import Any
 
 # Токен бота
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -13,13 +13,25 @@ DB_PASSWORD = os.getenv("DB_PASSWORD", "")
 DATABASE_URL = os.getenv("DATABASE_URL", f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}")
 
 # Состояния для ConversationHandler
-AGREEMENT, Q1, Q2, Q3, Q4, Q5 = range(6)
+AGREEMENT, AGE, OCCUPATION, MORNING_TIME, EVENING_TIME, Q1, Q2, Q3, Q4, Q5 = range(10)
 
-# Кэш для данных пользователей (основное хранилище - в БД)
-user_data_store: Dict[str, Any] = {}
-user_stats_store: Dict[str, Any] = {}
+# Кэш для данных пользователей
+user_data_store: dict[str, Any] = {}
+user_stats_store: dict[str, Any] = {}
 
-# Константы с текстами
+# --- НОВЫЕ ВОПРОСЫ ДЛЯ ОНБОРДИНГА ---
+AGE_QUESTION = "👤 Выбери, пожалуйста, свою возрастную группу. Чтобы лучше подбирать советы."
+AGE_OPTIONS = ["До 18", "18–24", "25–34", "35–44", "45+"]
+
+OCCUPATION_QUESTION = "💼 Чем ты сейчас в основном занимаешься?"
+OCCUPATION_OPTIONS = ["Учусь", "Работаю", "Работаю и учусь", "Не учусь и не работаю"]
+
+MORNING_TIME_QUESTION = "⏰ Во сколько тебе удобнее получать **утренние** сообщения?"
+MORNING_TIME_OPTIONS = ["07:00", "08:00", "09:00", "Не важно (09:00)"]
+
+EVENING_TIME_QUESTION = "🌙 Во сколько тебе удобнее получать **вечерние** сообщения?"
+EVENING_TIME_OPTIONS = ["21:00", "22:00", "23:00", "Не важно (21:00)"]
+
 WELCOME_TEXT = (
     "Привет! Я YourLifePilot — цифровой помощник, который помогает наладить сон и чуть аккуратнее относиться к себе.\n\n"
     "Я не врач и не ставлю диагнозы, моя роль — напоминать о маленьких шагах, поддерживать и задавать простые вопросы, "

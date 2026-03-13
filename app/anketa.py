@@ -13,28 +13,25 @@ from app.config import (
     Q5_TEXT,
     STRESS_OPTIONS,
     TIME_OPTIONS,
+    WAKE_OPTIONS,
     user_data_store,
     user_stats_store,
-    WAKE_OPTIONS,
 )
 from app.database import db
 from app.menu import get_keyboard
 
 
-# --- Обработчики вопросов онбординга ---
 async def q1_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
     user_id = str(query.from_user.id)
     data = query.data
 
-    # Сохраняем ответ
     answer_index = int(data.split('_')[1])
     answer_text = Q1_OPTIONS[answer_index]
     user_data_store[user_id]['answers']['q1'] = answer_text
 
-    # Анализируем для сценария (пример)
-    if answer_index <= 1:  # "1" или "2"
+    if answer_index <= 1:
         if 'плохой сон' not in user_data_store[user_id]['scenario']:
             user_data_store[user_id]['scenario'].append('плохой сон')
 
@@ -53,8 +50,7 @@ async def q2_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     answer_text = TIME_OPTIONS[answer_index]
     user_data_store[user_id]['answers']['q2'] = answer_text
 
-    # Анализ: хочет ложиться поздно?
-    if answer_index >= 2:  # "23:00-00:00" или "После полуночи"
+    if answer_index >= 2:
         if 'хочу ложиться поздно' not in user_data_store[user_id]['scenario']:
             user_data_store[user_id]['scenario'].append('хочу ложиться поздно')
 
@@ -73,8 +69,7 @@ async def q3_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     answer_text = TIME_OPTIONS[answer_index]
     user_data_store[user_id]['answers']['q3'] = answer_text
 
-    # Анализ: ложится поздно?
-    if answer_index >= 2:  # "23:00-00:00" или "После полуночи"
+    if answer_index >= 2:
         if 'ложусь поздно' not in user_data_store[user_id]['scenario']:
             user_data_store[user_id]['scenario'].append('ложусь поздно')
 
@@ -93,8 +88,7 @@ async def q4_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     answer_text = WAKE_OPTIONS[answer_index]
     user_data_store[user_id]['answers']['q4'] = answer_text
 
-    # Анализ: просыпается разбитым?
-    if answer_index == 2:  # "Разбитым(ой)"
+    if answer_index == 2:
         if 'просыпаюсь разбитым' not in user_data_store[user_id]['scenario']:
             user_data_store[user_id]['scenario'].append('просыпаюсь разбитым')
 
@@ -113,8 +107,7 @@ async def q5_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     answer_text = STRESS_OPTIONS[answer_index]
     user_data_store[user_id]['answers']['q5'] = answer_text
 
-    # Анализ: днём высокий стресс?
-    if answer_index == 1:  # "Днём"
+    if answer_index == 1:
         if 'днём высокий стресс' not in user_data_store[user_id]['scenario']:
             user_data_store[user_id]['scenario'].append('днём высокий стресс')
 
@@ -122,23 +115,36 @@ async def q5_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_data_store[user_id]['onboarding_complete'] = True
     user_data_store[user_id]['scenario'] = list(set(user_data_store[user_id]['scenario']))
 
-    # Сохраняем в базу данных
+    # Сохраняем в базу данных (все поля, включая новые)
     await db.save_user(user_id, user_data_store[user_id])
     await db.save_user_stats(user_id, user_stats_store[user_id])
 
-    # Сохраняем действие
-    await db.save_action(user_id, "onboarding", "completed", {"scenario": user_data_store[user_id]['scenario']})
-
-    await query.edit_message_text(
-        "Спасибо за ответы! Твой сценарий:"
-        f" {', '.join(user_data_store[user_id]['scenario']) if user_data_store[user_id]['scenario'] else 'баланс'}.\n"
-        "Теперь я буду присылать тебе полезные сообщения."
+    await db.save_action(
+        user_id,
+        "onboarding",
+        "completed",
+        {
+            "scenario": user_data_store[user_id]['scenario'],
+            "age_group": user_data_store[user_id]['age_group'],
+            "occupation": user_data_store[user_id]['occupation'],
+        },
     )
+
+    # Финальное сообщение с информацией об AI-чате
+    final_message = (
+        "🎉 *Спасибо за ответы!* Твой сценарий: "
+        f"{', '.join(user_data_store[user_id]['scenario']) if user_data_store[user_id]['scenario'] else 'баланс'}.\n\n"
+        "📅 Утренние сообщения будут приходить в *{}*, вечерние — в *{}*.\n\n"
+        "🤖 *Важно!* Ты всегда можешь поговорить с AI-помощником.\n"
+        "Просто напиши **/ai** и задай любой вопрос о стрессе, сне или просто поболтай.\n\n"
+        "Я здесь, чтобы поддержать тебя каждый день! 🌟"
+    ).format(user_data_store[user_id]['morning_time'], user_data_store[user_id]['evening_time'])
+
+    await query.edit_message_text(final_message, parse_mode='Markdown')
 
     return ConversationHandler.END
 
 
-# --- Отмена онбординга (на случай, если пользователь передумает) ---
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text("Онбординг отменён. Если захочешь начать заново, напиши /start.")
     return ConversationHandler.END

@@ -381,5 +381,30 @@ class Database:
             return {"error": str(e)}
 
 
+async def update_user_time(self, user_id: str, morning_time: str = None, evening_time: str = None) -> bool:
+    """Обновляет персональное время рассылок пользователя"""
+    try:
+        async with self.pool.acquire() as conn:
+            updates = []
+            values = []
+            if morning_time:
+                updates.append("morning_time = $2")
+                values.append(morning_time)
+            if evening_time:
+                updates.append("evening_time = $3")
+                values.append(evening_time)
+
+            if not updates:
+                return True
+
+            query = f"UPDATE users SET {', '.join(updates)} WHERE user_id = $1"
+            await conn.execute(query, user_id, *values)
+            logger.info(f"✅ Время пользователя {user_id} обновлено")
+            return True
+    except Exception as e:
+        logger.error(f"❌ Ошибка обновления времени: {e}")
+        return False
+
+
 # Создаем глобальный экземпляр БД
 db = Database()

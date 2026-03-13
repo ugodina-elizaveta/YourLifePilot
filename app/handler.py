@@ -15,11 +15,31 @@ from telegram.ext import (
 from app.ai import ai
 from app.anketa import cancel, q1_handler, q2_handler, q3_handler, q4_handler, q5_handler
 from app.bot_app import bot_app
-from app.config import AGREEMENT, Q1, Q2, Q3, Q4, Q5, user_data_store, user_stats_store
+from app.config import (
+    AGE,
+    AGREEMENT,
+    EVENING_TIME,
+    MORNING_TIME,
+    OCCUPATION,
+    Q1,
+    Q2,
+    Q3,
+    Q4,
+    Q5,
+    user_data_store,
+    user_stats_store,
+)
 from app.database import db
 from app.menu import get_simple_keyboard
 from app.sheduler import send_day_stress_message, send_evening_message, send_morning_message
-from app.start import agreement_handler, start
+from app.start import (
+    age_handler,
+    agreement_handler,
+    evening_time_handler,
+    morning_time_handler,
+    occupation_handler,
+    start,
+)
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -40,10 +60,17 @@ async def morning_action_handler(update: Update, context: ContextTypes.DEFAULT_T
         await db.save_action(user_id, "morning", "normal")
 
     elif data == "morning_broken":
-        # AI генерирует утренний совет
-        advice = ai.generate_advice(user_context="Пользователь проснулся разбитым", situation='morning')
+        # Получаем данные пользователя для персонализации
+        user_data = user_data_store.get(user_id, {})
 
-        if 'просыпаюсь разбитым' in user_data_store.get(user_id, {}).get('scenario', []):
+        # AI генерирует утренний совет
+        advice = ai.generate_advice(
+            user_context="Пользователь проснулся разбитым",
+            situation='morning',
+            user_data=user_data,  # ✅ Передаём возраст и занятия
+        )
+
+        if 'просыпаюсь разбитым' in user_data.get('scenario', []):
             await query.edit_message_text(
                 f"Жаль. {advice}\n\n" "Попробуй сейчас просто встать, подойти к окну и сделать 5 глубоких вдохов.",
                 reply_markup=get_simple_keyboard(
@@ -145,7 +172,7 @@ async def evening_action_handler(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def feeling_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Сохраняем ответ о самочувствии."""
+    """Сохраняем ответ о самочувствии и даем персонализированный AI-совет"""
     query = update.callback_query
     await query.answer()
     user_id = str(query.from_user.id)
@@ -172,7 +199,7 @@ async def feeling_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await db.save_mood(user_id, feeling)
     await db.save_action(user_id, "feeling", data)
 
-    # Анализируем через AI (YandexGPT уже работает!)
+    # Анализируем через AI
     sentiment = ai.analyze_sentiment(feeling)
     emotion = ai.analyze_emotion(feeling)
     logger.info(f"🤖 AI Анализ: {sentiment}, {emotion}")
@@ -180,13 +207,14 @@ async def feeling_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Получаем историю настроений
     mood_history = user_data_store[user_id].get('mood_history', [])
 
+    # Получаем данные пользователя для персонализации
+    user_data = user_data_store.get(user_id, {})
+
     # Если это уже 3-й ответ, анализируем тренд
     if len(mood_history) >= 3:
         trend = ai.analyze_mood_trend(mood_history)
 
-        # Проверяем, что trend не None и содержит нужные ключи
         if trend and isinstance(trend, dict) and 'message' in trend:
-            # Отправляем анализ тренда (не чаще раза в день)
             last_trend_date = context.user_data.get('last_trend_date')
             today = datetime.now().date()
 
@@ -199,16 +227,25 @@ async def feeling_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             logger.warning(f"⚠️ Некорректные данные тренда: {trend}")
 
-    # Если настроение плохое, даем поддерживающий совет через YandexGPT
+    # Если настроение плохое, даем поддерживающий совет с персонализацией
     if feeling in ['Напряжён(а)', 'Грустно', 'Очень плохо']:
         advice = ai.generate_advice(
             user_context=f"У пользователя настроение: {feeling}",
             situation='stress' if feeling == 'Напряжён(а)' else 'sad',
+            user_data=user_data,  # ✅ Передаём возраст и занятия
         )
 
-        # Отправляем совет с небольшой задержкой
         await asyncio.sleep(1.5)
         await query.message.reply_text(f"💡 {advice}")
+
+        # ✅ НОВОЕ: предлагаем рассказать о проблеме
+        await asyncio.sleep(2)
+        await query.message.reply_text(
+            "🗣️ *Если чувствуешь напряжение, усталость или стресс, можешь рассказать мне об этом.*\n\n"
+            "Например: *«Я устал(а) / переживаю / напряжён(а), сейчас я чувствую…»*\n\n"
+            "Просто напиши мне сообщение в режиме /ai — я выслушаю и постараюсь помочь. 🤗",
+            parse_mode='Markdown',
+        )
 
     await query.edit_message_text(f"Спасибо, что поделился(лась). Записал: {feeling}")
 
@@ -259,23 +296,28 @@ async def ai_chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Показываем, что бот печатает
     await context.bot.send_chat_action(chat_id=update.effective_user.id, action="typing")
 
-    # Получаем историю настроений пользователя
+    # Получаем данные пользователя для персонализации
     user_id = str(update.effective_user.id)
-    mood_history = user_data_store.get(user_id, {}).get('mood_history', [])
+    user_data = user_data_store.get(user_id, {})
+    mood_history = user_data.get('mood_history', [])
 
     # Определяем ситуацию по тексту сообщения
     situation = detect_situation_from_text(user_message)
 
-    # Формируем контекст
-    mood_summary = ""
+    # Формируем контекст с учётом истории настроений
+    mood_context = ""
     if mood_history:
         last_mood = mood_history[-1]['feeling']
-        mood_summary = f" (последнее настроение: {last_mood})"
+        mood_context = f" (последнее настроение: {last_mood})"
 
     logger.info(f"🤖 AI Чат: определена ситуация '{situation}' для сообщения")
 
-    # Генерируем ответ с правильной ситуацией
-    response = ai.generate_advice(user_context=user_message + mood_summary, situation=situation)
+    # Генерируем ответ с персонализацией
+    response = ai.generate_advice(
+        user_context=user_message + mood_context,
+        situation=situation,
+        user_data=user_data,  # ✅ Передаём возраст и занятия
+    )
 
     await update.message.reply_text(response)
 
@@ -284,14 +326,12 @@ def detect_situation_from_text(text: str) -> str:
     """Определяет ситуацию по тексту сообщения"""
     text_lower = text.lower()
 
-    # Ключевые слова для разных ситуаций
-    stress_keywords = ['стресс', 'напряж', 'пережив', 'тревог', 'волну', 'нерв']
-    sleep_keywords = ['сон', 'спать', 'уснуть', 'просып', 'бессонниц', 'кровать', 'ночь']
-    sad_keywords = ['груст', 'печал', 'тоск', 'плохое настроение', 'депресс', 'унын']
-    morning_keywords = ['утро', 'проснул', 'начать день', 'бодр']
-    evening_keywords = ['вечер', 'расслабит', 'перед сном', 'успокоят']
+    stress_keywords = ['стресс', 'напряж', 'пережив', 'тревог', 'волну', 'нерв', 'паник']
+    sleep_keywords = ['сон', 'спать', 'уснуть', 'просып', 'бессонниц', 'кровать', 'ночь', 'выспаться']
+    sad_keywords = ['груст', 'печал', 'тоск', 'плохое настроение', 'депресс', 'унын', 'тоска']
+    morning_keywords = ['утро', 'проснул', 'начать день', 'бодр', 'зарядк']
+    evening_keywords = ['вечер', 'расслабит', 'перед сном', 'успокоят', 'отдых']
 
-    # Проверяем по ключевым словам
     if any(word in text_lower for word in stress_keywords):
         return 'stress'
     elif any(word in text_lower for word in sleep_keywords):
@@ -326,11 +366,15 @@ async def stop_ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- НАСТРОЙКА ОБРАБОТЧИКОВ ---
 def setup_handlers():
     """Настраивает все обработчики для бота"""
-    # Обработчик диалога онбординга
+    # Обработчик диалога онбординга (обновлённый)
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', start)],
         states={
             AGREEMENT: [CallbackQueryHandler(agreement_handler, pattern="^agree$")],
+            AGE: [CallbackQueryHandler(age_handler, pattern="^age_")],
+            OCCUPATION: [CallbackQueryHandler(occupation_handler, pattern="^occupation_")],
+            MORNING_TIME: [CallbackQueryHandler(morning_time_handler, pattern="^morning_time_")],
+            EVENING_TIME: [CallbackQueryHandler(evening_time_handler, pattern="^evening_time_")],
             Q1: [CallbackQueryHandler(q1_handler, pattern="^q1_")],
             Q2: [CallbackQueryHandler(q2_handler, pattern="^q2_")],
             Q3: [CallbackQueryHandler(q3_handler, pattern="^q3_")],
@@ -366,39 +410,9 @@ def setup_handlers():
     bot_app.add_handler(CommandHandler("trigger_evening", trigger_evening))
     bot_app.add_handler(CommandHandler("trigger_day", trigger_day))
 
-    # Добавляем AI-команды
+    # AI-команды
     bot_app.add_handler(CommandHandler("ai", start_ai_chat))
     bot_app.add_handler(CommandHandler("stop_ai", stop_ai_chat))
     bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ai_chat_handler))
 
-    logger.info("✅ Handlers configured (including AI)")
-
-
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показывает список доступных команд"""
-    help_text = """
-🤖 **YourLifePilot - Доступные команды**
-
-**Основные:**
-/start - Начать работу с ботом
-/cancel - Отменить текущий диалог
-
-**AI-помощник:**
-/ai - Войти в режим общения с AI
-/stop_ai - Выйти из режима AI
-
-**Статистика:**
-/stats - Моя статистика
-/mood_history - История настроения
-
-**Тестовые команды:**
-/trigger_morning - Тест утренней рассылки
-/trigger_evening - Тест вечерней рассылки
-/trigger_day - Тест дневной рассылки
-
-/help - Показать это сообщение
-    """
-    await update.message.reply_text(help_text, parse_mode='Markdown')
-
-
-bot_app.add_handler(CommandHandler("help", help_command))
+    logger.info("✅ Handlers configured (including personalization)")

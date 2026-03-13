@@ -8,27 +8,27 @@ logger = logging.getLogger(__name__)
 
 
 class YandexGPTAI:
-    """Класс для работы с YandexGPT API (проверенный URL)"""
+    """Класс для работы с YandexGPT API с поддержкой персонализации"""
 
     def __init__(self):
         self.api_key = os.getenv("YANDEX_API_KEY")
         self.folder_id = os.getenv("YANDEX_FOLDER_ID")
-
-        # ПРОВЕРЕННЫЙ URL Yandex Cloud (не AI Studio)
         self.url = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
 
         self.requests_today = 0
         self.last_reset = datetime.now().date()
 
+        # Категории для разных ситуаций
         self.situation_prompts = {
-            'stress': "Ты - дружелюбный помощник по психологическому здоровью. Человек испытывает стресс. Дай ему короткий, практический совет, как успокоиться прямо сейчас. Ответ должен быть 2-3 предложения, начинай с конкретного действия.",
-            'sleep': "Ты - эксперт по сну. Человек спрашивает про сон. Дай конкретный, полезный совет, как улучшить качество сна или быстрее заснуть. Ответ должен быть 2-3 предложения.",
-            'sad': "Ты - поддерживающий друг. Человеку грустно. Поддержи его тёплыми, ободряющими словами, дай простой совет, как поднять настроение. Ответ должен быть 2-3 предложения.",
-            'morning': "Ты - эксперт по утренним ритуалам. Человек интересуется утром. Посоветуй, как начать день бодро и энергично. Ответ должен быть 2-3 предложения.",
-            'evening': "Ты - эксперт по релаксации. Человек спрашивает про вечер или сон. Посоветуй, как расслабиться вечером и подготовиться ко сну. Ответ должен быть 2-3 предложения.",
-            'general': "Ты - дружелюбный помощник. Дай короткий, полезный и разнообразный совет человеку. Ответ должен быть 2-3 предложения. Старайся не повторять одни и те же фразы в разных ответах.",
+            'stress': "Дай короткий, добрый, практический совет как справиться со стрессом. Учти возраст и образ жизни.",
+            'sleep': "Посоветуй что-то простое для улучшения сна. Учти возраст и образ жизни.",
+            'sad': "Поддержи тёплыми словами, дай простой совет поднять настроение. Учти возраст.",
+            'morning': "Дай совет как начать день бодро и позитивно. Учти возраст и чем человек занимается.",
+            'evening': "Посоветуй как расслабиться вечером перед сном. Учти возраст и занятия.",
+            'general': "Дай короткий, полезный, добрый совет. Учти возраст и образ жизни.",
         }
 
+        # Fallback советы на случай ошибок
         self.fallback_advice = {
             'stress': "Попробуй сделать глубокий вдох на 4 счета, задержать дыхание на 4, выдохнуть на 6. Повтори 5 раз. Это помогает успокоиться.",
             'sleep': "Постарайся ложиться спать в одно и то же время. За час до сна убери телефон и почитай книгу.",
@@ -38,9 +38,10 @@ class YandexGPTAI:
             'general': "Будь к себе добрее. Маленькие шаги каждый день приводят к большим изменениям.",
         }
 
-        logger.info("✅ YandexGPT AI инициализирован")
+        logger.info("✅ YandexGPT AI инициализирован (с поддержкой персонализации)")
 
     def _check_limit(self) -> bool:
+        """Проверяет, не превышен ли дневной лимит"""
         today = datetime.now().date()
         if today != self.last_reset:
             self.requests_today = 0
@@ -50,8 +51,63 @@ class YandexGPTAI:
             return False
         return True
 
-    def generate_advice(self, user_context: str, situation: str) -> str:
-        """Генерирует совет через YandexGPT API"""
+    def _get_personal_info(self, user_data: dict = None) -> str:
+        """
+        Формирует строку с информацией о пользователе для персонализации советов
+        """
+        if not user_data:
+            return ""
+
+        age = user_data.get('age_group', '')
+        occupation = user_data.get('occupation', '')
+        scenario = user_data.get('scenario', [])
+
+        parts = []
+
+        # Возраст
+        age_map = {
+            "До 18": "подросток",
+            "18–24": "молодой человек",
+            "25–34": "человек в активном возрасте",
+            "35–44": "человек среднего возраста",
+            "45+": "человек старшего возраста",
+        }
+
+        if age in age_map:
+            parts.append(age_map[age])
+        elif age:
+            parts.append(f"возраст {age}")
+
+        # Занятие
+        occ_map = {
+            "Учусь": "студент",
+            "Работаю": "работающий",
+            "Работаю и учусь": "работающий студент",
+            "Не учусь и не работаю": "в поиске себя",
+        }
+
+        if occupation in occ_map:
+            parts.append(occ_map[occupation])
+        elif occupation:
+            parts.append(occupation.lower())
+
+        # Сценарии (кратко)
+        if "ложусь поздно" in scenario:
+            parts.append("склонен(на) ложиться поздно")
+        if "просыпаюсь разбитым" in scenario:
+            parts.append("часто просыпается разбитым")
+        if "днём высокий стресс" in scenario:
+            parts.append("испытывает стресс днём")
+
+        if not parts:
+            return ""
+
+        return "Ты " + ", ".join(parts) + ". "
+
+    def generate_advice(self, user_context: str, situation: str, user_data: dict = None) -> str:
+        """
+        Генерирует персонализированный совет с учётом возраста и занятий
+        """
         if not self._check_limit():
             return self.fallback_advice.get(situation, self.fallback_advice['general'])
 
@@ -60,17 +116,29 @@ class YandexGPTAI:
             return self.fallback_advice.get(situation, self.fallback_advice['general'])
 
         try:
-            system_prompt = self.situation_prompts.get(situation, self.situation_prompts['general'])
-            user_prompt = user_context if user_context else "Дай совет"
+            # Получаем информацию о пользователе
+            personal_info = self._get_personal_info(user_data)
 
-            # Формируем запрос для Yandex Cloud API
-            payload = {
-                "modelUri": f"gpt://{self.folder_id}/yandexgpt-lite",
-                "completionOptions": {"stream": False, "temperature": 0.8, "maxTokens": 150},
-                "messages": [{"role": "system", "text": system_prompt}, {"role": "user", "text": user_prompt}],
-            }
+            # Формируем промпт
+            system_prompt = self.situation_prompts.get(situation, self.situation_prompts['general'])
+
+            if personal_info:
+                full_prompt = f"{personal_info}{system_prompt}\n\nКонтекст: {user_context}"
+            else:
+                full_prompt = f"{system_prompt}\n\n{user_context}"
 
             logger.info(f"🤖 Запрос к YandexGPT для ситуации '{situation}'")
+            logger.debug(f"Промпт: {full_prompt[:200]}...")
+
+            # Формируем запрос
+            payload = {
+                "modelUri": f"gpt://{self.folder_id}/yandexgpt-lite",
+                "completionOptions": {"stream": False, "temperature": 0.7, "maxTokens": 150},
+                "messages": [
+                    {"role": "system", "text": full_prompt},
+                    {"role": "user", "text": user_context if user_context else "Дай совет"},
+                ],
+            }
 
             response = requests.post(
                 self.url,
@@ -93,6 +161,7 @@ class YandexGPTAI:
 
         except requests.exceptions.ConnectionError as e:
             logger.error(f"❌ Ошибка подключения: {e}")
+            return self.fallback_advice.get(situation, self.fallback_advice['general'])
         except requests.Timeout:
             logger.error("❌ Таймаут при запросе к YandexGPT")
             return self.fallback_advice.get(situation, self.fallback_advice['general'])
@@ -108,6 +177,7 @@ class YandexGPTAI:
         return {'label': 'neutral', 'score': 0.5}
 
     def analyze_mood_trend(self, mood_history: list[dict]) -> dict:
+        """Анализирует тренд настроений"""
         if not mood_history or len(mood_history) < 3:
             return {'trend': 'insufficient_data', 'message': 'Нужно больше данных для анализа', 'average': 2.5}
 

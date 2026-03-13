@@ -389,11 +389,10 @@ async def send_support_message(context: ContextTypes.DEFAULT_TYPE, user_id: str)
 
 # --- ПЛАНИРОВЩИК ЗАДАЧ ---
 async def run_scheduler():
-    """Планировщик для периодических рассылок"""
+    """Планировщик для периодических рассылок с учётом персонального времени"""
     logger.info("=" * 60)
     logger.info("🕐 ПЛАНИРОВЩИК ЗАПУЩЕН")
     logger.info(f"🕐 Текущее время сервера: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    logger.info(f"🕐 Часовой пояс сервера: {datetime.now().astimezone().tzinfo}")
     logger.info("=" * 60)
 
     # Счетчик для периодических логов
@@ -405,77 +404,71 @@ async def run_scheduler():
             current_time = now.time()
             check_counter += 1
 
-            # Утренняя рассылка в 9:00
-            if current_time.hour == 9 and current_time.minute == 0:
-                logger.info("🎯" + "=" * 50)
-                logger.info("🎯 СРАБОТАЛО: УТРЕННЯЯ РАССЫЛКА в 9:00")
-                logger.info(
-                    f"🎯 Точное время срабатывания: {current_time.hour:02d}:{current_time.minute:02d}:{current_time.second:02d}"
-                )
-                logger.info("🎯" + "=" * 50)
+            # Проходим по всем пользователям и проверяем их персональное время
+            for user_id, data in user_data_store.items():
+                if not data.get('onboarding_complete', False):
+                    continue
 
-                class DummyContext:
-                    def __init__(self, bot):
-                        self.bot = bot
+                # Получаем персональное время пользователя
+                morning_time = data.get('morning_time', '09:00')
+                evening_time = data.get('evening_time', '21:00')
 
-                dummy_context = DummyContext(bot_app.bot)
-                await send_morning_message(dummy_context)
+                # Разбираем часы и минуты
+                morning_hour, morning_min = map(int, morning_time.split(':'))
+                evening_hour, evening_min = map(int, evening_time.split(':'))
 
-                logger.info("✅ Утренняя рассылка полностью завершена")
-                await asyncio.sleep(60)
+                # Утренняя рассылка для конкретного пользователя
+                if current_time.hour == morning_hour and current_time.minute == morning_min:
+                    logger.info(f"🎯 СРАБОТАЛО: УТРЕННЯЯ РАССЫЛКА для пользователя {user_id} в {morning_time}")
 
-            # Дневная рассылка в 15:00
-            elif current_time.hour == 15 and current_time.minute == 0:
-                logger.info("🎯" + "=" * 50)
-                logger.info("🎯 СРАБОТАЛО: ДНЕВНАЯ РАССЫЛКА в 15:00")
-                logger.info(
-                    f"🎯 Точное время срабатывания: {current_time.hour:02d}:{current_time.minute:02d}:{current_time.second:02d}"
-                )
-                logger.info("🎯" + "=" * 50)
+                    class DummyContext:
+                        def __init__(self, bot):
+                            self.bot = bot
 
-                class DummyContext:
-                    def __init__(self, bot):
-                        self.bot = bot
+                    dummy_context = DummyContext(bot_app.bot)
+                    await send_morning_message(dummy_context, target_user_id=user_id)
 
-                dummy_context = DummyContext(bot_app.bot)
-                await send_day_stress_message(dummy_context)
+                    # Ждем минуту, чтобы не сработать повторно
+                    await asyncio.sleep(60)
 
-                logger.info("✅ Дневная рассылка полностью завершена")
-                await asyncio.sleep(60)
+                # Дневная рассылка в 15:00 (оставляем общей)
+                if current_time.hour == 15 and current_time.minute == 0:
+                    # Отправляем только пользователям со стресс-сценарием
+                    if 'днём высокий стресс' in data.get('scenario', []):
+                        logger.info(f"🎯 СРАБОТАЛО: ДНЕВНАЯ РАССЫЛКА для пользователя {user_id}")
 
-            # Вечерняя рассылка в 21:00
-            elif current_time.hour == 21 and current_time.minute == 0:
-                logger.info("🎯" + "=" * 50)
-                logger.info("🎯 СРАБОТАЛО: ВЕЧЕРНЯЯ РАССЫЛКА в 21:00")
-                logger.info(
-                    f"🎯 Точное время срабатывания: {current_time.hour:02d}:{current_time.minute:02d}:{current_time.second:02d}"
-                )
-                logger.info("🎯" + "=" * 50)
+                        class DummyContext:
+                            def __init__(self, bot):
+                                self.bot = bot
 
-                class DummyContext:
-                    def __init__(self, bot):
-                        self.bot = bot
+                        dummy_context = DummyContext(bot_app.bot)
+                        await send_day_stress_message(dummy_context, target_user_id=user_id)
+                        await asyncio.sleep(60)
 
-                dummy_context = DummyContext(bot_app.bot)
-                await send_evening_message(dummy_context)
+                # Вечерняя рассылка для конкретного пользователя
+                if current_time.hour == evening_hour and current_time.minute == evening_min:
+                    logger.info(f"🎯 СРАБОТАЛО: ВЕЧЕРНЯЯ РАССЫЛКА для пользователя {user_id} в {evening_time}")
 
-                logger.info("✅ Вечерняя рассылка полностью завершена")
-                await asyncio.sleep(60)
+                    class DummyContext:
+                        def __init__(self, bot):
+                            self.bot = bot
+
+                    dummy_context = DummyContext(bot_app.bot)
+                    await send_evening_message(dummy_context, target_user_id=user_id)
+                    await asyncio.sleep(60)
 
             # Лог каждый час о том, что планировщик работает
-            if check_counter % 120 == 0:  # 120 * 30 сек = 3600 сек = 1 час
+            if check_counter % 120 == 0:
                 logger.info("=" * 50)
                 logger.info("⏰ ЧАСОВОЙ ОТЧЕТ ПЛАНИРОВЩИКА")
                 logger.info(f"В базе данных {len(user_data_store)} пользователей")
 
-                # Подсчет пользователей с онбордингом
                 onboarded = sum(1 for u in user_data_store.values() if u.get('onboarding_complete', False))
                 logger.info(f"Из них прошли онбординг: {onboarded}")
-
                 logger.info("=" * 50)
 
-            # Проверка каждые 60 секунд
-            await asyncio.sleep(60)
+            # Проверка каждые 30 секунд
+            await asyncio.sleep(30)
 
         except Exception as e:
             logger.error(f"❌ КРИТИЧЕСКАЯ ОШИБКА в планировщике: {e}", exc_info=True)
