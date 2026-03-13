@@ -47,7 +47,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             'last_name': db_user['last_name'],
             'onboarding_complete': db_user['onboarding_complete'],
             'scenario': db_user['scenario'],
-            'answers': db_user['answers'],
+            'answers': db_user['answers'] if isinstance(db_user['answers'], dict) else {},
             'age_group': db_user.get('age_group'),
             'occupation': db_user.get('occupation'),
             'morning_time': db_user.get('morning_time', '09:00'),
