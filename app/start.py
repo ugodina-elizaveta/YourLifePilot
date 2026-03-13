@@ -1,27 +1,26 @@
 import logging
-
 from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
 
 from app.config import (
-    AGE,
-    AGE_OPTIONS,
-    AGE_QUESTION,
     AGREEMENT,
-    DISCLAIMER_TEXT,
-    EVENING_TIME,
-    EVENING_TIME_OPTIONS,
-    EVENING_TIME_QUESTION,
-    MORNING_TIME,
-    MORNING_TIME_OPTIONS,
-    MORNING_TIME_QUESTION,
+    AGE,
     OCCUPATION,
-    OCCUPATION_OPTIONS,
+    MORNING_TIME,
+    EVENING_TIME,
+    AGE_QUESTION,
+    AGE_OPTIONS,
     OCCUPATION_QUESTION,
+    OCCUPATION_OPTIONS,
+    MORNING_TIME_QUESTION,
+    MORNING_TIME_OPTIONS,
+    EVENING_TIME_QUESTION,
+    EVENING_TIME_OPTIONS,
     Q1,
-    Q1_OPTIONS,
     Q1_TEXT,
+    Q1_OPTIONS,
     WELCOME_TEXT,
+    DISCLAIMER_TEXT,
     user_data_store,
     user_stats_store,
 )
@@ -115,7 +114,7 @@ async def agreement_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     """Обработка согласия - переходим к возрастной группе"""
     query = update.callback_query
     await query.answer()
-    # user_id = str(query.from_user.id)
+    user_id = str(query.from_user.id)
 
     if query.data == "agree":
         await query.edit_message_text(
@@ -137,8 +136,8 @@ async def age_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     user_id = str(query.from_user.id)
     data = query.data
 
-    # Сохраняем ответ
-    answer_index = int(data.split('_')[1])
+    # data format: age_0, age_1, etc.
+    answer_index = int(data.split('_')[1])  # индекс 1 для age_0
     answer_text = AGE_OPTIONS[answer_index]
     user_data_store[user_id]['age_group'] = answer_text
 
@@ -156,7 +155,8 @@ async def occupation_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_id = str(query.from_user.id)
     data = query.data
 
-    answer_index = int(data.split('_')[1])
+    # data format: occupation_0, occupation_1, etc.
+    answer_index = int(data.split('_')[1])  # индекс 1 для occupation_0
     answer_text = OCCUPATION_OPTIONS[answer_index]
     user_data_store[user_id]['occupation'] = answer_text
 
@@ -176,7 +176,10 @@ async def morning_time_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     user_id = str(query.from_user.id)
     data = query.data
 
-    answer_index = int(data.split('_')[1])
+    # data format: morning_time_0, morning_time_1, etc.
+    parts = data.split('_')
+    # parts = ['morning', 'time', '0'] → индекс 2
+    answer_index = int(parts[2])  # ИСПРАВЛЕНО: берём третий элемент
     answer_text = MORNING_TIME_OPTIONS[answer_index]
 
     # Если выбрано "Не важно", оставляем 9:00
@@ -201,7 +204,10 @@ async def evening_time_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     user_id = str(query.from_user.id)
     data = query.data
 
-    answer_index = int(data.split('_')[1])
+    # data format: evening_time_0, evening_time_1, etc.
+    parts = data.split('_')
+    # parts = ['evening', 'time', '0'] → индекс 2
+    answer_index = int(parts[2])  # ИСПРАВЛЕНО: берём третий элемент
     answer_text = EVENING_TIME_OPTIONS[answer_index]
 
     if answer_text == "Не важно (21:00)":
