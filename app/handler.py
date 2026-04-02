@@ -452,8 +452,8 @@ def setup_handlers():
     bot_app.add_handler(conv_handler)
 
     # Обработчики колбэков
-    bot_app.add_handler(CallbackQueryHandler(morning_action_handler, pattern="^morning_"))
     bot_app.add_handler(CallbackQueryHandler(morning_micro_handler, pattern="^morning_micro_"))
+    bot_app.add_handler(CallbackQueryHandler(morning_action_handler, pattern="^morning_"))
     bot_app.add_handler(CallbackQueryHandler(evening_action_handler, pattern="^evening_"))
     bot_app.add_handler(CallbackQueryHandler(day_stress_handler, pattern="^day_stress_"))
     bot_app.add_handler(CallbackQueryHandler(feeling_handler, pattern="^feeling_"))
