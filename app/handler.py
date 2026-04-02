@@ -110,6 +110,7 @@ async def morning_action_handler(update: Update, context: ContextTypes.DEFAULT_T
 async def morning_micro_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка микро-задачи утром."""
     query = update.callback_query
+    logger.info(f"🔍 morning_micro_handler вызван с data={query.data}")
     await query.answer()
     user_id = str(query.from_user.id)
     data = query.data
