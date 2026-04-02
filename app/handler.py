@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import uuid
 from datetime import datetime
 
 from telegram import Update
@@ -18,9 +19,13 @@ from app.bot_app import bot_app
 from app.config import (
     AGE,
     AGREEMENT,
+    BIWEEKLY_TIME,
+    DAILY_TIME,
     EVENING_TIME,
     MORNING_TIME,
+    NOTIFICATION_FREQ,
     OCCUPATION,
+    PHYSICAL_LIMITS,
     Q1,
     Q2,
     Q3,
@@ -35,9 +40,14 @@ from app.sheduler import send_day_stress_message, send_evening_message, send_mor
 from app.start import (
     age_handler,
     agreement_handler,
+    biweekly_time_handler,
+    daily_time_handler,
     evening_time_handler,
     morning_time_handler,
+    notification_frequency_handler,
     occupation_handler,
+    physical_limits_details_handler,
+    physical_limits_handler,
     start,
 )
 
@@ -287,17 +297,28 @@ async def day_stress_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def ai_chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обычный чат с AI - определяет тему сообщения и даёт релевантный ответ"""
+    user_id = str(update.effective_user.id)
     user_message = update.message.text
 
     # Проверяем, активирован ли режим чата
     if not context.user_data.get('ai_chat_mode'):
         return
 
+    # Получаем или создаём ID сессии
+    session_id = context.user_data.get('ai_chat_session_id')
+    if not session_id:
+        session_id = str(uuid.uuid4())
+        context.user_data['ai_chat_session_id'] = session_id
+
+    # Сохраняем сообщение пользователя
+    await db.save_ai_chat_message(
+        user_id=user_id, session_id=session_id, message=user_message, role="user", metadata={"type": "user_query"}
+    )
+
     # Показываем, что бот печатает
     await context.bot.send_chat_action(chat_id=update.effective_user.id, action="typing")
 
     # Получаем данные пользователя для персонализации
-    user_id = str(update.effective_user.id)
     user_data = user_data_store.get(user_id, {})
     mood_history = user_data.get('mood_history', [])
 
@@ -316,7 +337,16 @@ async def ai_chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     response = ai.generate_advice(
         user_context=user_message + mood_context,
         situation=situation,
-        user_data=user_data,  # ✅ Передаём возраст и занятия
+        user_data=user_data,
+    )
+
+    # Сохраняем ответ бота
+    await db.save_ai_chat_message(
+        user_id=user_id,
+        session_id=session_id,
+        message=response,
+        role="assistant",
+        metadata={"situation": situation, "sentiment": ai.analyze_sentiment(user_message)},
     )
 
     await update.message.reply_text(response)
@@ -348,7 +378,20 @@ def detect_situation_from_text(text: str) -> str:
 
 async def start_ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Вход в режим AI-чата"""
+    user_id = str(update.effective_user.id)
+    # Генерируем новый ID сессии
+    context.user_data['ai_chat_session_id'] = str(uuid.uuid4())
     context.user_data['ai_chat_mode'] = True
+
+    # Сохраняем начало сессии
+    await db.save_ai_chat_message(
+        user_id=user_id,
+        session_id=context.user_data['ai_chat_session_id'],
+        message="[Начало сессии]",
+        role="system",
+        metadata={"event": "session_start"},
+    )
+
     await update.message.reply_text(
         "🤖 **Режим общения с AI активирован!**\n\n"
         "Задавай любые вопросы, делись переживаниями или просто болтай.\n"
@@ -359,14 +402,28 @@ async def start_ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def stop_ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Выход из режима AI-чата"""
+    user_id = str(update.effective_user.id)
+    session_id = context.user_data.get('ai_chat_session_id')
+
+    if session_id:
+        await db.save_ai_chat_message(
+            user_id=user_id,
+            session_id=session_id,
+            message="[Конец сессии]",
+            role="system",
+            metadata={"event": "session_end"},
+        )
+
     context.user_data['ai_chat_mode'] = False
+    context.user_data['ai_chat_session_id'] = None
+
     await update.message.reply_text("👋 Режим AI чата завершен.\n" "Возвращайся ещё, когда захочешь поговорить!")
 
 
 # --- НАСТРОЙКА ОБРАБОТЧИКОВ ---
 def setup_handlers():
     """Настраивает все обработчики для бота"""
-    # Обработчик диалога онбординга (обновлённый)
+
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', start)],
         states={
@@ -375,6 +432,13 @@ def setup_handlers():
             OCCUPATION: [CallbackQueryHandler(occupation_handler, pattern="^occupation_")],
             MORNING_TIME: [CallbackQueryHandler(morning_time_handler, pattern="^morning_time_")],
             EVENING_TIME: [CallbackQueryHandler(evening_time_handler, pattern="^evening_time_")],
+            PHYSICAL_LIMITS: [
+                CallbackQueryHandler(physical_limits_handler, pattern="^physical_"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, physical_limits_details_handler),
+            ],
+            NOTIFICATION_FREQ: [CallbackQueryHandler(notification_frequency_handler, pattern="^freq_")],
+            DAILY_TIME: [CallbackQueryHandler(daily_time_handler, pattern="^daily_time_")],
+            BIWEEKLY_TIME: [CallbackQueryHandler(biweekly_time_handler, pattern="^biweekly_time_")],
             Q1: [CallbackQueryHandler(q1_handler, pattern="^q1_")],
             Q2: [CallbackQueryHandler(q2_handler, pattern="^q2_")],
             Q3: [CallbackQueryHandler(q3_handler, pattern="^q3_")],

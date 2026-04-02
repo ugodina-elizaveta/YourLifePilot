@@ -153,3 +153,25 @@ CREATE TRIGGER update_stats_updated_at
     EXECUTE FUNCTION update_updated_at_column();
 
 COMMENT ON TRIGGER update_stats_updated_at ON user_stats IS 'Автоматически обновляет updated_at при изменении статистики';
+
+-- Таблица для хранения диалогов AI-чата
+CREATE TABLE IF NOT EXISTS ai_chat_history (
+    id SERIAL PRIMARY KEY,
+    user_id TEXT REFERENCES users(user_id) ON DELETE CASCADE,
+    session_id TEXT NOT NULL,                      -- Идентификатор сессии (UUID)
+    message TEXT NOT NULL,                         -- Текст сообщения
+    role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),  -- user или assistant
+    metadata JSONB DEFAULT '{}',                   -- Дополнительные данные (настроение, тема)
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Индексы для быстрого поиска
+CREATE INDEX IF NOT EXISTS idx_ai_chat_user_id ON ai_chat_history(user_id);
+CREATE INDEX IF NOT EXISTS idx_ai_chat_session_id ON ai_chat_history(session_id);
+CREATE INDEX IF NOT EXISTS idx_ai_chat_created_at ON ai_chat_history(created_at);
+
+-- Комментарии
+COMMENT ON TABLE ai_chat_history IS 'История диалогов в режиме AI-чата';
+COMMENT ON COLUMN ai_chat_history.session_id IS 'Идентификатор сессии диалога (один сеанс чата)';
+COMMENT ON COLUMN ai_chat_history.role IS 'Роль отправителя: user или assistant';
+COMMENT ON COLUMN ai_chat_history.metadata IS 'Дополнительные метаданные (настроение пользователя, определённая ситуация)';

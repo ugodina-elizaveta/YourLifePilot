@@ -102,7 +102,7 @@ class Database:
                             user_id, username, first_name, last_name,
                             onboarding_complete, scenario, answers,
                             created_at, last_active
-                        ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, 
+                        ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb,
                                 CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                         """,
                         user_id,
@@ -344,8 +344,8 @@ class Database:
                 today = date.today()
                 active_today = await conn.fetchval(
                     """
-                    SELECT COUNT(DISTINCT user_id) 
-                    FROM user_actions 
+                    SELECT COUNT(DISTINCT user_id)
+                    FROM user_actions
                     WHERE created_at::date = $1
                 """,
                     today,
@@ -365,7 +365,7 @@ class Database:
                 # Средние streak'и
                 avg_streaks = await conn.fetchrow(
                     """
-                    SELECT 
+                    SELECT
                         AVG(morning_streak) as avg_morning,
                         AVG(evening_streak) as avg_evening,
                         AVG(day_stress_streak) as avg_stress
@@ -388,6 +388,88 @@ class Database:
         except Exception as e:
             logger.error(f"❌ Ошибка получения статистики: {e}")
             return {"error": str(e)}
+
+    # =================================================
+    # AI ЧАТ – СОХРАНЕНИЕ ДИАЛОГОВ
+    # =================================================
+
+    async def save_ai_chat_message(
+        self, user_id: str, session_id: str, message: str, role: str, metadata: Dict = None
+    ) -> bool:
+        """Сохраняет одно сообщение из AI-чата"""
+        try:
+            async with self.pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO ai_chat_history (user_id, session_id, message, role, metadata)
+                    VALUES ($1, $2, $3, $4, $5::jsonb)
+                    """,
+                    user_id,
+                    session_id,
+                    message,
+                    role,
+                    json.dumps(metadata or {}),
+                )
+                logger.info(f"✅ Сохранено сообщение AI-чата для {user_id} (role={role})")
+                return True
+        except Exception as e:
+            logger.error(f"❌ Ошибка сохранения сообщения AI-чата: {e}")
+            return False
+
+    async def get_ai_chat_history(self, user_id: str, session_id: str = None, limit: int = 50) -> List[Dict]:
+        """Получает историю AI-чата пользователя"""
+        try:
+            async with self.pool.acquire() as conn:
+                if session_id:
+                    rows = await conn.fetch(
+                        """
+                        SELECT * FROM ai_chat_history
+                        WHERE user_id = $1 AND session_id = $2
+                        ORDER BY created_at ASC
+                        LIMIT $3
+                        """,
+                        user_id,
+                        session_id,
+                        limit,
+                    )
+                else:
+                    rows = await conn.fetch(
+                        """
+                        SELECT * FROM ai_chat_history
+                        WHERE user_id = $1
+                        ORDER BY created_at DESC
+                        LIMIT $2
+                        """,
+                        user_id,
+                        limit,
+                    )
+                return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"❌ Ошибка получения истории AI-чата: {e}")
+            return []
+
+    async def get_user_sessions(self, user_id: str) -> List[Dict]:
+        """Получает список сессий AI-чата пользователя"""
+        try:
+            async with self.pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT
+                        session_id,
+                        MIN(created_at) as start_time,
+                        MAX(created_at) as end_time,
+                        COUNT(*) as message_count
+                    FROM ai_chat_history
+                    WHERE user_id = $1
+                    GROUP BY session_id
+                    ORDER BY start_time DESC
+                    """,
+                    user_id,
+                )
+                return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"❌ Ошибка получения сессий AI-чата: {e}")
+            return []
 
 
 async def update_user_time(self, user_id: str, morning_time: str = None, evening_time: str = None) -> bool:
