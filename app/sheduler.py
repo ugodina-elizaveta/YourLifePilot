@@ -387,6 +387,49 @@ async def send_support_message(context: ContextTypes.DEFAULT_TYPE, user_id: str)
         logger.error(f"❌ [ВЕЧЕР] Ошибка отправки поддержки {user_id}: {e}")
 
 
+def should_send_message(user_id: str, message_type: str) -> bool:
+    """
+    Определяет, нужно ли отправлять сообщение пользователю с учётом его настроек частоты.
+    """
+    user_data = user_data_store.get(user_id, {})
+    frequency = user_data.get('notification_frequency', '')
+
+    # Если частота не задана или полная поддержка — отправляем всё
+    if not frequency or frequency.startswith("2-3"):
+        return True
+
+    # Режим "1 сообщение в день"
+    if frequency.startswith("1 сообщение"):
+        daily_time = user_data.get('daily_time', '')
+        if daily_time.startswith("Утром"):
+            return message_type == 'morning'
+        elif daily_time.startswith("Днём"):
+            return message_type == 'day'
+        elif daily_time.startswith("Вечером"):
+            return message_type == 'evening'
+        return message_type == 'morning'
+
+    # Режим "Раз в пару дней"
+    if frequency.startswith("Раз в пару дней"):
+        # Проверяем дату последней отправки (используем last_morning_date как индикатор)
+        last_sent = user_data.get('last_morning_date')
+        if last_sent:
+            days_since = (datetime.now().date() - last_sent).days
+            if days_since < 2:
+                return False
+
+        biweekly_time = user_data.get('biweekly_time', '')
+        if biweekly_time.startswith("Утром"):
+            return message_type == 'morning'
+        elif biweekly_time.startswith("Днём"):
+            return message_type == 'day'
+        elif biweekly_time.startswith("Вечером"):
+            return message_type == 'evening'
+        return message_type == 'morning'
+
+    return True
+
+
 # --- ПЛАНИРОВЩИК ЗАДАЧ ---
 async def run_scheduler():
     """Планировщик для периодических рассылок с учётом персонального времени"""
@@ -413,49 +456,67 @@ async def run_scheduler():
                 morning_time = data.get('morning_time', '09:00')
                 evening_time = data.get('evening_time', '21:00')
 
-                # Разбираем часы и минуты
-                morning_hour, morning_min = map(int, morning_time.split(':'))
-                evening_hour, evening_min = map(int, evening_time.split(':'))
+                # ✅ Пропускаем, если время не задано
+                if morning_time is None:
+                    morning_time = '09:00'
+                if evening_time is None:
+                    evening_time = None  # оставляем None, ниже будет проверка
 
-                # Утренняя рассылка для конкретного пользователя
-                if current_time.hour == morning_hour and current_time.minute == morning_min:
-                    logger.info(f"🎯 СРАБОТАЛО: УТРЕННЯЯ РАССЫЛКА для пользователя {user_id} в {morning_time}")
+                # Утренняя рассылка
+                if morning_time:
+                    try:
+                        morning_hour, morning_min = map(int, morning_time.split(':'))
+                        if current_time.hour == morning_hour and current_time.minute == morning_min:
+                            if should_send_message(user_id, 'morning'):
+                                logger.info(f"🎯 [УТРО] Рассылка пользователю {user_id} в {morning_time}")
 
-                    class DummyContext:
-                        def __init__(self, bot):
-                            self.bot = bot
+                                class DummyContext:
+                                    def __init__(self, bot):
+                                        self.bot = bot
 
-                    dummy_context = DummyContext(bot_app.bot)
-                    await send_morning_message(dummy_context, target_user_id=user_id)
+                                dummy_context = DummyContext(bot_app.bot)
+                                await send_morning_message(dummy_context, target_user_id=user_id)
+                                await asyncio.sleep(60)
+                            else:
+                                logger.info(f"⏭️ [УТРО] Пропускаем {user_id} (по настройкам частоты)")
+                    except (ValueError, TypeError):
+                        logger.warning(f"⚠️ [УТРО] Некорректное время утренней рассылки для {user_id}: {morning_time}")
 
-                    # Ждем минуту, чтобы не сработать повторно
-                    await asyncio.sleep(60)
+                # Вечерняя рассылка (только если evening_time не None)
+                if evening_time is not None:
+                    try:
+                        evening_hour, evening_min = map(int, evening_time.split(':'))
+                        if current_time.hour == evening_hour and current_time.minute == evening_min:
+                            if should_send_message(user_id, 'evening'):
+                                logger.info(f"🎯 [ВЕЧЕР] Рассылка пользователю {user_id} в {evening_time}")
 
-                # Дневная рассылка в 15:00 (оставляем общей)
+                                class DummyContext:
+                                    def __init__(self, bot):
+                                        self.bot = bot
+
+                                dummy_context = DummyContext(bot_app.bot)
+                                await send_evening_message(dummy_context, target_user_id=user_id)
+                                await asyncio.sleep(60)
+                            else:
+                                logger.info(f"⏭️ [ВЕЧЕР] Пропускаем {user_id} (по настройкам частоты)")
+                    except (ValueError, TypeError):
+                        logger.warning(f"⚠️ [ВЕЧЕР] Некорректное время вечерней рассылки для {user_id}: {evening_time}")
+
+                # Дневная рассылка в 15:00
                 if current_time.hour == 15 and current_time.minute == 0:
-                    # Отправляем только пользователям со стресс-сценарием
-                    if 'днём высокий стресс' in data.get('scenario', []):
-                        logger.info(f"🎯 СРАБОТАЛО: ДНЕВНАЯ РАССЫЛКА для пользователя {user_id}")
+                    if should_send_message(user_id, 'day'):
+                        if 'днём высокий стресс' in data.get('scenario', []):
+                            logger.info(f"🎯 [ДЕНЬ] Рассылка пользователю {user_id}")
 
-                        class DummyContext:
-                            def __init__(self, bot):
-                                self.bot = bot
+                            class DummyContext:
+                                def __init__(self, bot):
+                                    self.bot = bot
 
-                        dummy_context = DummyContext(bot_app.bot)
-                        await send_day_stress_message(dummy_context, target_user_id=user_id)
-                        await asyncio.sleep(60)
-
-                # Вечерняя рассылка для конкретного пользователя
-                if current_time.hour == evening_hour and current_time.minute == evening_min:
-                    logger.info(f"🎯 СРАБОТАЛО: ВЕЧЕРНЯЯ РАССЫЛКА для пользователя {user_id} в {evening_time}")
-
-                    class DummyContext:
-                        def __init__(self, bot):
-                            self.bot = bot
-
-                    dummy_context = DummyContext(bot_app.bot)
-                    await send_evening_message(dummy_context, target_user_id=user_id)
-                    await asyncio.sleep(60)
+                            dummy_context = DummyContext(bot_app.bot)
+                            await send_day_stress_message(dummy_context, target_user_id=user_id)
+                            await asyncio.sleep(60)
+                    else:
+                        logger.info(f"⏭️ [ДЕНЬ] Пропускаем {user_id} (по настройкам частоты)")
 
             # Лог каждый час о том, что планировщик работает
             if check_counter % 120 == 0:
