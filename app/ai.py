@@ -104,6 +104,21 @@ class YandexGPTAI:
 
         return "Ты " + ", ".join(parts) + ". "
 
+    def _get_physical_info(self, user_data: dict = None) -> str:
+        """Формирует строку с информацией о физических ограничениях"""
+        if not user_data:
+            return ""
+
+        physical_limits = user_data.get('physical_limits', '')
+        if not physical_limits or physical_limits == "Без ограничений":
+            return ""
+
+        return (
+            f"ВАЖНО: У пользователя есть ограничения: {physical_limits}. "
+            "НЕ рекомендуй физические упражнения, бег, интенсивные нагрузки. "
+            "Предлагай только безопасные практики: глубокое медленное дыхание, лёгкая растяжка сидя."
+        )
+
     def generate_advice(self, user_context: str, situation: str, user_data: dict = None) -> str:
         """
         Генерирует персонализированный совет с учётом возраста и занятий
@@ -118,14 +133,17 @@ class YandexGPTAI:
         try:
             # Получаем информацию о пользователе
             personal_info = self._get_personal_info(user_data)
+            physical_info = self._get_physical_info(user_data)
 
-            # Формируем промпт
-            system_prompt = self.situation_prompts.get(situation, self.situation_prompts['general'])
-
+            # Формируем полный промпт
+            context_parts = []
             if personal_info:
-                full_prompt = f"{personal_info}{system_prompt}\n\nКонтекст: {user_context}"
-            else:
-                full_prompt = f"{system_prompt}\n\n{user_context}"
+                context_parts.append(personal_info)
+            if physical_info:
+                context_parts.append(physical_info)
+
+            context_str = " ".join(context_parts)
+            full_prompt = f"{context_str}{self.situation_prompts.get(situation)}"
 
             logger.info(f"🤖 Запрос к YandexGPT для ситуации '{situation}'")
             logger.debug(f"Промпт: {full_prompt[:200]}...")

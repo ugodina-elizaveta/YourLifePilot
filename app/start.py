@@ -46,6 +46,21 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 
+async def save_user_to_db(user_id: str):
+    """Сохраняет все данные пользователя из кэша в БД"""
+    user_data = user_data_store.get(user_id, {})
+    await db.save_user(user_id, user_data)
+    logger.info(
+        f"💾 Пользователь {user_id} сохранён в БД: "
+        f"age={user_data.get('age_group')}, "
+        f"occupation={user_data.get('occupation')}, "
+        f"morning={user_data.get('morning_time')}, "
+        f"evening={user_data.get('evening_time')}, "
+        f"physical={user_data.get('physical_limits')}, "
+        f"freq={user_data.get('notification_frequency')}"
+    )
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Точка входа /start"""
     user = update.effective_user
@@ -137,7 +152,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             'last_action_date': {},
         }
 
-        await db.save_user(user_id, user_data_store[user_id])
+        await save_user_to_db(user_id)
         await db.save_user_stats(user_id, user_stats_store[user_id])
         logger.info(f"✅ Новый пользователь {user_id} создан")
 
@@ -236,8 +251,8 @@ async def evening_time_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 
     await query.edit_message_text("Спасибо! Записал.")
 
-    # Сохраняем базовую информацию в БД
-    await db.save_user(user_id, user_data_store[user_id])
+    # ✅ Сохраняем базовую информацию (возраст, занятие, время)
+    await save_user_to_db(user_id)
 
     # Переходим к вопросу о физических ограничениях
     await query.message.reply_text(
@@ -265,6 +280,7 @@ async def physical_limits_handler(update: Update, context: ContextTypes.DEFAULT_
     else:
         user_data_store[user_id]['physical_limits'] = answer_text
         await query.edit_message_text("Спасибо! Я учту это при подборе рекомендаций.")
+        await save_user_to_db(user_id)  # ✅ Сохраняем после выбора ограничений
         await query.message.reply_text(
             NOTIFICATION_FREQUENCY_QUESTION, reply_markup=get_keyboard(NOTIFICATION_FREQUENCY_OPTIONS, "freq")
         )
@@ -277,6 +293,7 @@ async def physical_limits_details_handler(update: Update, context: ContextTypes.
     user_data_store[user_id]['physical_limits'] = update.message.text
 
     await update.message.reply_text("Спасибо! Я учту это при подборе рекомендаций.")
+    await save_user_to_db(user_id)  # ✅ Сохраняем после ввода ограничений
     await update.message.reply_text(
         NOTIFICATION_FREQUENCY_QUESTION, reply_markup=get_keyboard(NOTIFICATION_FREQUENCY_OPTIONS, "freq")
     )
@@ -294,6 +311,7 @@ async def notification_frequency_handler(update: Update, context: ContextTypes.D
     answer_text = NOTIFICATION_FREQUENCY_OPTIONS[answer_index]
 
     user_data_store[user_id]['notification_frequency'] = answer_text
+    await save_user_to_db(user_id)  # ✅ Сохраняем частоту
 
     await query.edit_message_text(f"Записал: {answer_text}")
 
@@ -306,10 +324,8 @@ async def notification_frequency_handler(update: Update, context: ContextTypes.D
             BIWEEKLY_TIME_QUESTION, reply_markup=get_keyboard(BIWEEKLY_TIME_OPTIONS, "biweekly_time")
         )
         return BIWEEKLY_TIME
-    else:  # "2-3 сообщения в день" (стандартный режим)
-        # Сохраняем настройки в БД
-        await db.save_user(user_id, user_data_store[user_id])
-        # Переходим к вопросам про сон
+    else:  # "2-3 сообщения в день"
+        await save_user_to_db(user_id)
         await query.message.reply_text("Отлично! Теперь несколько вопросов про твой сон и самочувствие.")
         await query.message.reply_text(Q1_TEXT, reply_markup=get_keyboard(Q1_OPTIONS, "q1"))
         return Q1
@@ -326,14 +342,15 @@ async def daily_time_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     user_data_store[user_id]['daily_time'] = answer_text
 
-    # Определяем конкретное время для рассылки
+    # Определяем время для рассылки
     time_map = {"Утром (08:00-10:00)": "09:00", "Днём (13:00-15:00)": "14:00", "Вечером (19:00-21:00)": "20:00"}
     user_data_store[user_id]['morning_time'] = time_map.get(answer_text, "09:00")
+    # Для режима 1 сообщение в день — отключаем вечерние и дневные
+    user_data_store[user_id]['evening_time'] = None
+    user_data_store[user_id]['notification_skip_days'] = 0
 
     await query.edit_message_text(f"Записал: {answer_text}. Буду присылать одно сообщение в день.")
-
-    # Сохраняем настройки в БД
-    await db.save_user(user_id, user_data_store[user_id])
+    await save_user_to_db(user_id)  # ✅ Сохраняем все настройки
 
     # Переходим к вопросам про сон
     await query.message.reply_text("Теперь несколько вопросов про твой сон и самочувствие.")
@@ -352,17 +369,14 @@ async def biweekly_time_handler(update: Update, context: ContextTypes.DEFAULT_TY
 
     user_data_store[user_id]['biweekly_time'] = answer_text
 
-    # Определяем конкретное время для рассылки
     time_map = {"Утром (08:00-10:00)": "09:00", "Днём (13:00-15:00)": "14:00", "Вечером (19:00-21:00)": "20:00"}
     user_data_store[user_id]['morning_time'] = time_map.get(answer_text, "09:00")
-    user_data_store[user_id]['notification_skip_days'] = 1  # флаг для пропуска дней
+    user_data_store[user_id]['evening_time'] = None
+    user_data_store[user_id]['notification_skip_days'] = 1
 
     await query.edit_message_text(f"Записал: {answer_text}. Буду присылать сообщения раз в 2 дня.")
+    await save_user_to_db(user_id)  # ✅ Сохраняем все настройки
 
-    # Сохраняем настройки в БД
-    await db.save_user(user_id, user_data_store[user_id])
-
-    # Переходим к вопросам про сон
     await query.message.reply_text("Теперь несколько вопросов про твой сон и самочувствие.")
     await query.message.reply_text(Q1_TEXT, reply_markup=get_keyboard(Q1_OPTIONS, "q1"))
     return Q1
