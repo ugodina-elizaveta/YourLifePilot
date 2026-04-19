@@ -2,6 +2,7 @@ import logging
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 from peft import PeftModel
+from app.config import FORBIDDEN_TOPICS
 
 logger = logging.getLogger(__name__)
 
