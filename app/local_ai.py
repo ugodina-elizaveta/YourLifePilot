@@ -99,7 +99,9 @@ class LocalAI:
                         "Я здесь, чтобы поддержать, но в этой ситуации важно поговорить со специалистом.")
 
         if not self.is_loaded:
-            return "Извини, модель ещё загружается. Попробуй ещё раз через минуту."
+            self.load_model()
+            if not self.is_loaded:
+                return "Извини, сейчас я загружаюсь. Попробуй ещё раз через минуту."
 
         try:
             system_message = (
@@ -119,6 +121,7 @@ class LocalAI:
                     do_sample=True,
                     top_p=0.9,
                     pad_token_id=self.tokenizer.eos_token_id,
+                    cache_implementation=None,  # ← ДОБАВИТЬ ЭТУ СТРОКУ
                 )
 
             response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
