@@ -1,0 +1,7 @@
+{
+  "rank": 2,
+  "train_loss": 7.581763349260602,
+  "train_runtime": 1584.3347,
+  "train_samples_per_second": 1.06,
+  "train_steps_per_second": 0.133
+}
