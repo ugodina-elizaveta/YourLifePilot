@@ -1,26 +1,41 @@
+# /YourLifePilot/app/start.py
+
 import logging
+
 from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
 
 from app.config import (
-    AGREEMENT,
     AGE,
-    OCCUPATION,
-    MORNING_TIME,
-    EVENING_TIME,
-    AGE_QUESTION,
     AGE_OPTIONS,
-    OCCUPATION_QUESTION,
-    OCCUPATION_OPTIONS,
-    MORNING_TIME_QUESTION,
-    MORNING_TIME_OPTIONS,
-    EVENING_TIME_QUESTION,
-    EVENING_TIME_OPTIONS,
-    Q1,
-    Q1_TEXT,
-    Q1_OPTIONS,
-    WELCOME_TEXT,
+    AGE_QUESTION,
+    AGREEMENT,
+    BIWEEKLY_TIME,
+    BIWEEKLY_TIME_OPTIONS,
+    BIWEEKLY_TIME_QUESTION,
+    DAILY_TIME,
+    DAILY_TIME_OPTIONS,
+    DAILY_TIME_QUESTION,
     DISCLAIMER_TEXT,
+    EVENING_TIME,
+    EVENING_TIME_OPTIONS,
+    EVENING_TIME_QUESTION,
+    MORNING_TIME,
+    MORNING_TIME_OPTIONS,
+    MORNING_TIME_QUESTION,
+    NOTIFICATION_FREQ,
+    NOTIFICATION_FREQUENCY_OPTIONS,
+    NOTIFICATION_FREQUENCY_QUESTION,
+    OCCUPATION,
+    OCCUPATION_OPTIONS,
+    OCCUPATION_QUESTION,
+    PHYSICAL_LIMITS,
+    PHYSICAL_LIMITS_OPTIONS,
+    PHYSICAL_LIMITS_QUESTION,
+    Q1,
+    Q1_OPTIONS,
+    Q1_TEXT,
+    WELCOME_TEXT,
     user_data_store,
     user_stats_store,
 )
@@ -31,20 +46,33 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 
+async def save_user_to_db(user_id: str):
+    """Сохраняет все данные пользователя из кэша в БД"""
+    user_data = user_data_store.get(user_id, {})
+    await db.save_user(user_id, user_data)
+    logger.info(
+        f"💾 Пользователь {user_id} сохранён в БД: "
+        f"age={user_data.get('age_group')}, "
+        f"occupation={user_data.get('occupation')}, "
+        f"morning={user_data.get('morning_time')}, "
+        f"evening={user_data.get('evening_time')}, "
+        f"physical={user_data.get('physical_limits')}, "
+        f"freq={user_data.get('notification_frequency')}"
+    )
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Точка входа /start"""
     user = update.effective_user
     user_id = str(user.id)
 
-    # Проверяем, есть ли пользователь в БД
     db_user = await db.get_user(user_id)
 
     if db_user:
-        # Загружаем из БД в кэш с правильной обработкой JSON
+        # Загружаем существующего пользователя
         scenario_data = db_user['scenario']
         answers_data = db_user['answers']
 
-        # ✅ ИСПРАВЛЕНИЕ: преобразуем строку в список если нужно
         if isinstance(scenario_data, str):
             import json
 
@@ -72,9 +100,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             'occupation': db_user.get('occupation'),
             'morning_time': db_user.get('morning_time', '09:00'),
             'evening_time': db_user.get('evening_time', '21:00'),
+            'physical_limits': db_user.get('physical_limits'),
+            'notification_frequency': db_user.get('notification_frequency'),
+            'daily_time': db_user.get('daily_time'),
+            'biweekly_time': db_user.get('biweekly_time'),
             'mood_history': [],
         }
-        # Загружаем статистику
+
         stats = await db.get_user_stats(user_id)
         if stats:
             user_stats_store[user_id] = stats
@@ -91,7 +123,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
         logger.info(f"✅ Пользователь {user_id} загружен из БД")
     else:
-        # Создаем нового пользователя
+        # Создаём нового пользователя
         user_data_store[user_id] = {
             'username': user.username,
             'first_name': user.first_name,
@@ -103,6 +135,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             'occupation': None,
             'morning_time': '09:00',
             'evening_time': '21:00',
+            'physical_limits': None,
+            'notification_frequency': None,
+            'daily_time': None,
+            'biweekly_time': None,
             'mood_history': [],
         }
 
@@ -116,15 +152,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             'last_action_date': {},
         }
 
-        # Сохраняем в БД
-        await db.save_user(user_id, user_data_store[user_id])
+        await save_user_to_db(user_id)
         await db.save_user_stats(user_id, user_stats_store[user_id])
         logger.info(f"✅ Новый пользователь {user_id} создан")
 
     await update.message.reply_text(WELCOME_TEXT)
     await update.message.reply_text(
-        DISCLAIMER_TEXT,
-        reply_markup=get_simple_keyboard({"✅ Понимаю и согласен(на)": "agree"}),
+        DISCLAIMER_TEXT, reply_markup=get_simple_keyboard({"✅ Понимаю и согласен(на)": "agree"})
     )
     return AGREEMENT
 
@@ -153,10 +187,7 @@ async def age_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     query = update.callback_query
     await query.answer()
     user_id = str(query.from_user.id)
-    data = query.data
-
-    # data format: age_0, age_1, etc.
-    answer_index = int(data.split('_')[1])  # индекс 1 для age_0
+    answer_index = int(query.data.split('_')[1])
     answer_text = AGE_OPTIONS[answer_index]
     user_data_store[user_id]['age_group'] = answer_text
 
@@ -172,16 +203,11 @@ async def occupation_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
     user_id = str(query.from_user.id)
-    data = query.data
-
-    # data format: occupation_0, occupation_1, etc.
-    answer_index = int(data.split('_')[1])  # индекс 1 для occupation_0
+    answer_index = int(query.data.split('_')[1])
     answer_text = OCCUPATION_OPTIONS[answer_index]
     user_data_store[user_id]['occupation'] = answer_text
 
     await query.edit_message_text("Спасибо! Записал.")
-
-    # Вопрос 3: Удобное время для утренних сообщений
     await query.message.reply_text(
         MORNING_TIME_QUESTION, reply_markup=get_keyboard(MORNING_TIME_OPTIONS, "morning_time")
     )
@@ -193,23 +219,16 @@ async def morning_time_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     await query.answer()
     user_id = str(query.from_user.id)
-    data = query.data
-
-    # data format: morning_time_0, morning_time_1, etc.
-    parts = data.split('_')
-    # parts = ['morning', 'time', '0'] → индекс 2
-    answer_index = int(parts[2])  # ИСПРАВЛЕНО: берём третий элемент
+    parts = query.data.split('_')
+    answer_index = int(parts[2])
     answer_text = MORNING_TIME_OPTIONS[answer_index]
 
-    # Если выбрано "Не важно", оставляем 9:00
     if answer_text == "Не важно (09:00)":
         user_data_store[user_id]['morning_time'] = "09:00"
     else:
         user_data_store[user_id]['morning_time'] = answer_text
 
     await query.edit_message_text("Спасибо! Записал.")
-
-    # Вопрос 4: Удобное время для вечерних сообщений
     await query.message.reply_text(
         EVENING_TIME_QUESTION, reply_markup=get_keyboard(EVENING_TIME_OPTIONS, "evening_time")
     )
@@ -221,12 +240,8 @@ async def evening_time_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     await query.answer()
     user_id = str(query.from_user.id)
-    data = query.data
-
-    # data format: evening_time_0, evening_time_1, etc.
-    parts = data.split('_')
-    # parts = ['evening', 'time', '0'] → индекс 2
-    answer_index = int(parts[2])  # ИСПРАВЛЕНО: берём третий элемент
+    parts = query.data.split('_')
+    answer_index = int(parts[2])
     answer_text = EVENING_TIME_OPTIONS[answer_index]
 
     if answer_text == "Не важно (21:00)":
@@ -234,11 +249,140 @@ async def evening_time_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     else:
         user_data_store[user_id]['evening_time'] = answer_text
 
-    await query.edit_message_text("Отлично! Теперь несколько вопросов про твой сон и самочувствие.")
+    await query.edit_message_text("Спасибо! Записал.")
 
-    # Сохраняем обновленные данные в БД
-    await db.save_user(user_id, user_data_store[user_id])
+    # ✅ Сохраняем базовую информацию (возраст, занятие, время)
+    await save_user_to_db(user_id)
 
-    # Переходим к первому вопросу про сон
+    # Переходим к вопросу о физических ограничениях
+    await query.message.reply_text(
+        PHYSICAL_LIMITS_QUESTION, reply_markup=get_keyboard(PHYSICAL_LIMITS_OPTIONS, "physical")
+    )
+    return PHYSICAL_LIMITS
+
+
+async def physical_limits_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Обработка ответа о физических ограничениях"""
+    query = update.callback_query
+    await query.answer()
+    user_id = str(query.from_user.id)
+    parts = query.data.split('_')
+    answer_index = int(parts[1])
+    answer_text = PHYSICAL_LIMITS_OPTIONS[answer_index]
+
+    if answer_text == "Другое (укажу в следующем шаге)":
+        await query.edit_message_text(
+            "Пожалуйста, опиши свои ограничения в одном сообщении.\n\n"
+            "Например: «У меня астма, нельзя интенсивных нагрузок» или «Беременность, 2 триместр»."
+        )
+        context.user_data['awaiting_physical_details'] = True
+        return PHYSICAL_LIMITS
+    else:
+        user_data_store[user_id]['physical_limits'] = answer_text
+        await query.edit_message_text("Спасибо! Я учту это при подборе рекомендаций.")
+        await save_user_to_db(user_id)  # ✅ Сохраняем после выбора ограничений
+        await query.message.reply_text(
+            NOTIFICATION_FREQUENCY_QUESTION, reply_markup=get_keyboard(NOTIFICATION_FREQUENCY_OPTIONS, "freq")
+        )
+        return NOTIFICATION_FREQ
+
+
+async def physical_limits_details_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Обработка свободного ввода ограничений"""
+    user_id = str(update.effective_user.id)
+    user_data_store[user_id]['physical_limits'] = update.message.text
+
+    await update.message.reply_text("Спасибо! Я учту это при подборе рекомендаций.")
+    await save_user_to_db(user_id)  # ✅ Сохраняем после ввода ограничений
+    await update.message.reply_text(
+        NOTIFICATION_FREQUENCY_QUESTION, reply_markup=get_keyboard(NOTIFICATION_FREQUENCY_OPTIONS, "freq")
+    )
+    context.user_data['awaiting_physical_details'] = False
+    return NOTIFICATION_FREQ
+
+
+async def notification_frequency_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Обработка выбора частоты уведомлений"""
+    query = update.callback_query
+    await query.answer()
+    user_id = str(query.from_user.id)
+    parts = query.data.split('_')
+    answer_index = int(parts[1])
+    answer_text = NOTIFICATION_FREQUENCY_OPTIONS[answer_index]
+
+    user_data_store[user_id]['notification_frequency'] = answer_text
+    await save_user_to_db(user_id)  # ✅ Сохраняем частоту
+
+    await query.edit_message_text(f"Записал: {answer_text}")
+
+    # Определяем следующий шаг в зависимости от выбора
+    if answer_index == 1:  # "1 сообщение в день"
+        await query.message.reply_text(DAILY_TIME_QUESTION, reply_markup=get_keyboard(DAILY_TIME_OPTIONS, "daily_time"))
+        return DAILY_TIME
+    elif answer_index == 2:  # "Раз в пару дней"
+        await query.message.reply_text(
+            BIWEEKLY_TIME_QUESTION, reply_markup=get_keyboard(BIWEEKLY_TIME_OPTIONS, "biweekly_time")
+        )
+        return BIWEEKLY_TIME
+    else:  # "2-3 сообщения в день"
+        await save_user_to_db(user_id)
+        await query.message.reply_text("Отлично! Теперь несколько вопросов про твой сон и самочувствие.")
+        await query.message.reply_text(Q1_TEXT, reply_markup=get_keyboard(Q1_OPTIONS, "q1"))
+        return Q1
+
+
+async def daily_time_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Обработка выбора времени для режима 1 сообщение в день"""
+    query = update.callback_query
+    await query.answer()
+    user_id = str(query.from_user.id)
+    parts = query.data.split('_')
+    answer_index = int(parts[2])
+    answer_text = DAILY_TIME_OPTIONS[answer_index]
+
+    user_data_store[user_id]['daily_time'] = answer_text
+
+    # Определяем время для рассылки
+    time_map = {"Утром (08:00-10:00)": "09:00", "Днём (13:00-15:00)": "14:00", "Вечером (19:00-21:00)": "20:00"}
+    user_data_store[user_id]['morning_time'] = time_map.get(answer_text, "09:00")
+    # Для режима 1 сообщение в день — отключаем вечерние и дневные
+    user_data_store[user_id]['evening_time'] = None
+    user_data_store[user_id]['notification_skip_days'] = 0
+
+    await query.edit_message_text(f"Записал: {answer_text}. Буду присылать одно сообщение в день.")
+    await save_user_to_db(user_id)  # ✅ Сохраняем все настройки
+
+    # Переходим к вопросам про сон
+    await query.message.reply_text("Теперь несколько вопросов про твой сон и самочувствие.")
     await query.message.reply_text(Q1_TEXT, reply_markup=get_keyboard(Q1_OPTIONS, "q1"))
     return Q1
+
+
+async def biweekly_time_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Обработка выбора времени для режима раз в пару дней"""
+    query = update.callback_query
+    await query.answer()
+    user_id = str(query.from_user.id)
+    parts = query.data.split('_')
+    answer_index = int(parts[2])
+    answer_text = BIWEEKLY_TIME_OPTIONS[answer_index]
+
+    user_data_store[user_id]['biweekly_time'] = answer_text
+
+    time_map = {"Утром (08:00-10:00)": "09:00", "Днём (13:00-15:00)": "14:00", "Вечером (19:00-21:00)": "20:00"}
+    user_data_store[user_id]['morning_time'] = time_map.get(answer_text, "09:00")
+    user_data_store[user_id]['evening_time'] = None
+    user_data_store[user_id]['notification_skip_days'] = 1
+
+    await query.edit_message_text(f"Записал: {answer_text}. Буду присылать сообщения раз в 2 дня.")
+    await save_user_to_db(user_id)  # ✅ Сохраняем все настройки
+
+    await query.message.reply_text("Теперь несколько вопросов про твой сон и самочувствие.")
+    await query.message.reply_text(Q1_TEXT, reply_markup=get_keyboard(Q1_OPTIONS, "q1"))
+    return Q1
+
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Отмена онбординга"""
+    await update.message.reply_text("Онбординг отменён. Если захочешь начать заново, напиши /start.")
+    return ConversationHandler.END

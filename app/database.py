@@ -61,13 +61,12 @@ class Database:
     # =================================================
 
     async def save_user(self, user_id: str, user_data: Dict[str, Any]) -> bool:
-        """Сохраняет или обновляет пользователя"""
+        """Сохраняет или обновляет пользователя со всеми полями"""
         try:
             async with self.pool.acquire() as conn:
                 # Проверяем существование пользователя
                 exists = await conn.fetchval("SELECT EXISTS(SELECT 1 FROM users WHERE user_id = $1)", user_id)
 
-                # ✅ ИСПРАВЛЕНИЕ: явно преобразуем в JSON
                 scenario_json = json.dumps(user_data.get("scenario", []), ensure_ascii=False)
                 answers_json = json.dumps(user_data.get("answers", {}), ensure_ascii=False)
 
@@ -76,42 +75,64 @@ class Database:
                     await conn.execute(
                         """
                         UPDATE users SET
-                            username = $2,
-                            first_name = $3,
-                            last_name = $4,
-                            onboarding_complete = $5,
-                            scenario = $6::jsonb,
-                            answers = $7::jsonb,
+                            username = $2, first_name = $3, last_name = $4,
+                            onboarding_complete = $5, scenario = $6::jsonb, answers = $7::jsonb,
+                            age_group = $8, occupation = $9,
+                            morning_time = $10, evening_time = $11,
+                            physical_limits = $12,
+                            notification_frequency = $13, daily_time = $14,
+                            biweekly_time = $15, notification_skip_days = $16,
                             last_active = CURRENT_TIMESTAMP
                         WHERE user_id = $1
-                        """,
+                    """,
                         user_id,
                         user_data.get("username", ""),
                         user_data.get("first_name", ""),
                         user_data.get("last_name", ""),
                         user_data.get("onboarding_complete", False),
-                        scenario_json,  # ✅ строка, которая станет jsonb
-                        answers_json,  # ✅ строка, которая станет jsonb
+                        scenario_json,
+                        answers_json,
+                        user_data.get("age_group"),
+                        user_data.get("occupation"),
+                        user_data.get("morning_time", "09:00"),
+                        user_data.get("evening_time", "21:00"),
+                        user_data.get("physical_limits"),
+                        user_data.get("notification_frequency"),
+                        user_data.get("daily_time"),
+                        user_data.get("biweekly_time"),
+                        user_data.get("notification_skip_days", 0),
                     )
                     logger.info(f"✅ Пользователь {user_id} обновлен в БД")
                 else:
-                    # Создаем нового пользователя
                     await conn.execute(
                         """
                         INSERT INTO users (
                             user_id, username, first_name, last_name,
                             onboarding_complete, scenario, answers,
+                            age_group, occupation, morning_time, evening_time,
+                            physical_limits, notification_frequency, daily_time,
+                            biweekly_time, notification_skip_days,
                             created_at, last_active
-                        ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, 
+                        ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb,
+                                $8, $9, $10, $11, $12, $13, $14, $15, $16,
                                 CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                        """,
+                    """,
                         user_id,
                         user_data.get("username", ""),
                         user_data.get("first_name", ""),
                         user_data.get("last_name", ""),
                         user_data.get("onboarding_complete", False),
-                        scenario_json,  # ✅ строка, которая станет jsonb
-                        answers_json,  # ✅ строка, которая станет jsonb
+                        scenario_json,
+                        answers_json,
+                        user_data.get("age_group"),
+                        user_data.get("occupation"),
+                        user_data.get("morning_time", "09:00"),
+                        user_data.get("evening_time", "21:00"),
+                        user_data.get("physical_limits"),
+                        user_data.get("notification_frequency"),
+                        user_data.get("daily_time"),
+                        user_data.get("biweekly_time"),
+                        user_data.get("notification_skip_days", 0),
                     )
                     logger.info(f"✅ Новый пользователь {user_id} создан в БД")
                 return True
@@ -344,8 +365,8 @@ class Database:
                 today = date.today()
                 active_today = await conn.fetchval(
                     """
-                    SELECT COUNT(DISTINCT user_id) 
-                    FROM user_actions 
+                    SELECT COUNT(DISTINCT user_id)
+                    FROM user_actions
                     WHERE created_at::date = $1
                 """,
                     today,
@@ -365,7 +386,7 @@ class Database:
                 # Средние streak'и
                 avg_streaks = await conn.fetchrow(
                     """
-                    SELECT 
+                    SELECT
                         AVG(morning_streak) as avg_morning,
                         AVG(evening_streak) as avg_evening,
                         AVG(day_stress_streak) as avg_stress
@@ -389,30 +410,111 @@ class Database:
             logger.error(f"❌ Ошибка получения статистики: {e}")
             return {"error": str(e)}
 
+    # =================================================
+    # AI ЧАТ – СОХРАНЕНИЕ ДИАЛОГОВ
+    # =================================================
 
-async def update_user_time(self, user_id: str, morning_time: str = None, evening_time: str = None) -> bool:
-    """Обновляет персональное время рассылок пользователя"""
-    try:
-        async with self.pool.acquire() as conn:
-            updates = []
-            values = []
-            if morning_time:
-                updates.append("morning_time = $2")
-                values.append(morning_time)
-            if evening_time:
-                updates.append("evening_time = $3")
-                values.append(evening_time)
-
-            if not updates:
+    async def save_ai_chat_message(
+        self, user_id: str, session_id: str, message: str, role: str, metadata: Dict = None
+    ) -> bool:
+        """Сохраняет одно сообщение из AI-чата"""
+        try:
+            async with self.pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO ai_chat_history (user_id, session_id, message, role, metadata)
+                    VALUES ($1, $2, $3, $4, $5::jsonb)
+                    """,
+                    user_id,
+                    session_id,
+                    message,
+                    role,
+                    json.dumps(metadata or {}),
+                )
+                logger.info(f"✅ Сохранено сообщение AI-чата для {user_id} (role={role})")
                 return True
+        except Exception as e:
+            logger.error(f"❌ Ошибка сохранения сообщения AI-чата: {e}")
+            return False
 
-            query = f"UPDATE users SET {', '.join(updates)} WHERE user_id = $1"
-            await conn.execute(query, user_id, *values)
-            logger.info(f"✅ Время пользователя {user_id} обновлено")
-            return True
-    except Exception as e:
-        logger.error(f"❌ Ошибка обновления времени: {e}")
-        return False
+    async def get_ai_chat_history(self, user_id: str, session_id: str = None, limit: int = 50) -> List[Dict]:
+        """Получает историю AI-чата пользователя"""
+        try:
+            async with self.pool.acquire() as conn:
+                if session_id:
+                    rows = await conn.fetch(
+                        """
+                        SELECT * FROM ai_chat_history
+                        WHERE user_id = $1 AND session_id = $2
+                        ORDER BY created_at ASC
+                        LIMIT $3
+                        """,
+                        user_id,
+                        session_id,
+                        limit,
+                    )
+                else:
+                    rows = await conn.fetch(
+                        """
+                        SELECT * FROM ai_chat_history
+                        WHERE user_id = $1
+                        ORDER BY created_at DESC
+                        LIMIT $2
+                        """,
+                        user_id,
+                        limit,
+                    )
+                return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"❌ Ошибка получения истории AI-чата: {e}")
+            return []
+
+    async def get_user_sessions(self, user_id: str) -> List[Dict]:
+        """Получает список сессий AI-чата пользователя"""
+        try:
+            async with self.pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT
+                        session_id,
+                        MIN(created_at) as start_time,
+                        MAX(created_at) as end_time,
+                        COUNT(*) as message_count
+                    FROM ai_chat_history
+                    WHERE user_id = $1
+                    GROUP BY session_id
+                    ORDER BY start_time DESC
+                    """,
+                    user_id,
+                )
+                return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"❌ Ошибка получения сессий AI-чата: {e}")
+            return []
+
+    async def update_user_time(self, user_id: str, morning_time: str = None, evening_time: str = None) -> bool:
+        """Обновляет персональное время рассылок пользователя"""
+        try:
+            async with self.pool.acquire() as conn:
+                updates = []
+                values = []
+                if morning_time:
+                    updates.append("morning_time = $2")
+                    values.append(morning_time)
+                if evening_time:
+                    updates.append("evening_time = $3")
+                    values.append(evening_time)
+
+                if not updates:
+                    return True
+
+                query = f"UPDATE users SET {', '.join(updates)} WHERE user_id = $1"
+                await conn.execute(query, user_id, *values)
+                logger.info(f"✅ Время пользователя {user_id} обновлено")
+                return True
+        except Exception as e:
+            logger.error(f"❌ Ошибка обновления времени: {e}")
+            return False
 
 
 # Создаем глобальный экземпляр БД
