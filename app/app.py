@@ -1,3 +1,5 @@
+# /YourLifePilot/app/app.py
+
 import asyncio
 import logging
 import sys
@@ -15,13 +17,13 @@ from app.sheduler import run_scheduler
 
 # Настройка логирования
 logging.basicConfig(
-    level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', stream=sys.stdout
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    stream=sys.stdout
 )
 logger = logging.getLogger(__name__)
 
 scheduler_tasks = []
-
-# Для отслеживания активности
 last_activity = datetime.now()
 
 # Вызываем настройку обработчиков
@@ -71,7 +73,19 @@ async def lifespan(app: FastAPI):
             else:
                 logger.error("❌ Не удалось установить webhook")
 
-        # 5. Запускаем планировщик
+        # 5. Загружаем локальную AI-модель (LoRA r=2) при старте
+        try:
+            from app.local_ai import local_ai
+            logger.info("🤖 Предварительная загрузка локальной модели LoRA r=2...")
+            local_ai.load_model()
+            if local_ai.is_loaded:
+                logger.info("✅ Локальная модель успешно загружена")
+            else:
+                logger.warning("⚠️ Локальная модель не загрузилась, будет использоваться YandexGPT")
+        except Exception as e:
+            logger.error(f"❌ Ошибка при загрузке локальной модели: {e}")
+
+        # 6. Запускаем планировщик
         scheduler_task = asyncio.create_task(run_scheduler())
         scheduler_tasks.append(scheduler_task)
         logger.info("✅ Планировщик запущен")

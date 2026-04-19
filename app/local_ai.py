@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class LocalAI:
-    """Локальная модель LoRA r=2 с максимальной экономией памяти"""
+    """Локальная модель LoRA r=2"""
 
     def __init__(self):
         self.model = None
@@ -22,22 +22,22 @@ class LocalAI:
         self.model_path = "/YourLifePilot/models/lora_r2"
 
     def load_model(self):
-        """Загружает модель с максимальной экономией памяти"""
+        """Загружает модель (вызывается при старте бота)"""
         if self.is_loaded:
+            logger.info("Модель уже загружена")
             return
 
         try:
             logger.info("🚀 Загрузка локальной модели LoRA r=2...")
 
-            # Ограничиваем количество потоков PyTorch
+            # Ограничиваем потоки для экономии памяти
             torch.set_num_threads(2)
             os.environ["OMP_NUM_THREADS"] = "2"
             os.environ["MKL_NUM_THREADS"] = "2"
 
-            # Принудительно очищаем память перед загрузкой
             gc.collect()
 
-            # 4-битная конфигурация (8-bit может требовать больше памяти при загрузке)
+            # 4-битная конфигурация
             bnb_config = BitsAndBytesConfig(
                 load_in_4bit=True,
                 bnb_4bit_compute_dtype=torch.float16,
@@ -53,8 +53,7 @@ class LocalAI:
             if self.tokenizer.pad_token is None:
                 self.tokenizer.pad_token = self.tokenizer.eos_token
 
-            # Загружаем базовую модель в 4-битном формате
-            # Используем device_map="auto" для автоматического распределения
+            # Базовая модель
             base_model = AutoModelForCausalLM.from_pretrained(
                 "microsoft/Phi-3.5-mini-instruct",
                 quantization_config=bnb_config,
@@ -65,24 +64,27 @@ class LocalAI:
                 low_cpu_mem_usage=True,
             )
 
-            # Загружаем LoRA адаптер
+            # LoRA адаптер
             self.model = PeftModel.from_pretrained(base_model, self.model_path)
             self.model.eval()
 
-            # Отключаем градиенты
             for param in self.model.parameters():
                 param.requires_grad = False
 
             self.is_loaded = True
-            logger.info("✅ Локальная модель LoRA r=2 успешно загружена (4-bit)")
+            logger.info("✅ Локальная модель LoRA r=2 успешно загружена")
 
-            # Логируем использование памяти
+            # Логируем память
             memory_mb = psutil.Process().memory_info().rss / 1024 / 1024
             logger.info(f"📊 Использование RAM: {memory_mb:.0f} MB")
 
         except Exception as e:
             logger.error(f"❌ Ошибка загрузки локальной модели: {e}")
             self.is_loaded = False
+
+    def is_available(self) -> bool:
+        """Проверяет, загружена ли модель"""
+        return self.is_loaded
 
     def generate_advice(self, user_context: str, situation: str, user_data: dict = None) -> str:
         """Генерирует персонализированный совет"""
@@ -97,9 +99,7 @@ class LocalAI:
                         "Я здесь, чтобы поддержать, но в этой ситуации важно поговорить со специалистом.")
 
         if not self.is_loaded:
-            self.load_model()
-            if not self.is_loaded:
-                return "Извини, сейчас я загружаюсь. Попробуй ещё раз через минуту."
+            return "Извини, модель ещё загружается. Попробуй ещё раз через минуту."
 
         try:
             system_message = (
@@ -134,6 +134,7 @@ class LocalAI:
             return ("Извини, сейчас я немного загружен. Попробуй ещё раз чуть позже. "
                     "А пока могу предложить сделать несколько глубоких вдохов — это помогает.")
 
+    # Заглушки
     def analyze_sentiment(self, text: str) -> dict:
         return {'label': 'NEUTRAL', 'score': 0.5}
 
