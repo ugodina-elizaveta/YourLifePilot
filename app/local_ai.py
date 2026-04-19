@@ -128,7 +128,7 @@ class LocalAI:
             with torch.no_grad():
                 outputs = self.model.generate(
                     **inputs,
-                    max_new_tokens=100,
+                    max_new_tokens=50,
                     temperature=0.7,
                     do_sample=True,
                     top_p=0.9,

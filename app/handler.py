@@ -13,8 +13,8 @@ from telegram.ext import (
     filters,
 )
 
-# from app.ai import ai
-from app.local_ai import local_ai as ai
+from app.ai import ai
+# from app.local_ai import local_ai as ai
 from app.anketa import cancel, q1_handler, q2_handler, q3_handler, q4_handler, q5_handler
 from app.bot_app import bot_app
 from app.config import (
