@@ -57,7 +57,7 @@ class LocalAI:
             base_model = AutoModelForCausalLM.from_pretrained(
                 "microsoft/Phi-3.5-mini-instruct",
                 device_map="cpu",
-                torch_dtype=torch.float32,  # Можно попробовать float16 для экономии
+                torch_dtype=torch.float16,
                 trust_remote_code=True,
                 use_cache=False,
                 low_cpu_mem_usage=True,
