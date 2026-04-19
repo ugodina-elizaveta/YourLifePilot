@@ -1,13 +1,19 @@
+# /YourLifePilot/app/local_ai.py
+
 import logging
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 from peft import PeftModel
 from app.config import FORBIDDEN_TOPICS
+import gc
+import psutil
 
 logger = logging.getLogger(__name__)
 
 
 class LocalAI:
+    """Локальная модель LoRA r=2 в 8-битном формате (экономия памяти)"""
+
     def __init__(self):
         self.model = None
         self.tokenizer = None
@@ -15,20 +21,24 @@ class LocalAI:
         self.model_path = "/YourLifePilot/models/lora_r2"
 
     def load_model(self):
+        """Загружает модель в 8-битном формате"""
         if self.is_loaded:
             return
 
         try:
-            logger.info("🚀 Загрузка локальной модели LoRA r=2 в 4-битном формате...")
+            logger.info("🚀 Загрузка локальной модели LoRA r=2 в 8-битном формате...")
 
-            # 4-битная конфигурация для экономии памяти
+            # Принудительно очищаем память перед загрузкой
+            gc.collect()
+
+            # 8-битная конфигурация (экономит больше памяти)
             bnb_config = BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_compute_dtype=torch.float16,
-                bnb_4bit_use_double_quant=True,
-                bnb_4bit_quant_type="nf4",
+                load_in_8bit=True,
+                llm_int8_threshold=6.0,
+                llm_int8_has_fp16_weight=False,
             )
 
+            # Токенизатор
             self.tokenizer = AutoTokenizer.from_pretrained(
                 "microsoft/Phi-3.5-mini-instruct",
                 trust_remote_code=True
@@ -36,32 +46,40 @@ class LocalAI:
             if self.tokenizer.pad_token is None:
                 self.tokenizer.pad_token = self.tokenizer.eos_token
 
-            # Загружаем базовую модель в 4-битном формате (на CPU)
+            # Загружаем базовую модель в 8-битном формате на CPU
             base_model = AutoModelForCausalLM.from_pretrained(
                 "microsoft/Phi-3.5-mini-instruct",
                 quantization_config=bnb_config,
-                device_map="cpu",  # принудительно на CPU
-                torch_dtype=torch.float16,
+                device_map="cpu",
+                torch_dtype=torch.float32,
                 trust_remote_code=True,
                 use_cache=False,
+                low_cpu_mem_usage=True,
             )
 
             # Загружаем LoRA адаптер
             self.model = PeftModel.from_pretrained(base_model, self.model_path)
             self.model.eval()
 
+            # Отключаем градиенты
+            for param in self.model.parameters():
+                param.requires_grad = False
+
             self.is_loaded = True
-            logger.info("✅ Локальная модель LoRA r=2 успешно загружена (4-bit)")
+            logger.info("✅ Локальная модель LoRA r=2 успешно загружена (8-bit)")
+
+            # Логируем использование памяти
+            memory_mb = psutil.Process().memory_info().rss / 1024 / 1024
+            logger.info(f"📊 Использование RAM: {memory_mb:.0f} MB")
 
         except Exception as e:
             logger.error(f"❌ Ошибка загрузки локальной модели: {e}")
             self.is_loaded = False
 
     def generate_advice(self, user_context: str, situation: str, user_data: dict = None) -> str:
-        """
-        Генерирует персонализированный совет с помощью локальной модели
-        """
-        # Проверяем на запрещённые темы
+        """Генерирует персонализированный совет"""
+
+        # Проверка на запрещённые темы
         context_lower = user_context.lower()
         for forbidden in FORBIDDEN_TOPICS:
             if forbidden in context_lower:
@@ -72,9 +90,10 @@ class LocalAI:
 
         if not self.is_loaded:
             self.load_model()
+            if not self.is_loaded:
+                return "Извини, сейчас я загружаюсь. Попробуй ещё раз через минуту."
 
         try:
-            # Формируем промпт
             system_message = (
                 "Ты — эмпатичный помощник, оказывающий психологическую поддержку. "
                 "Отвечай доброжелательно, поддерживающе и по существу. Будь кратким (2-3 предложения)."
@@ -82,12 +101,12 @@ class LocalAI:
 
             prompt = f"<|system|>\n{system_message}<|end|>\n<|user|>\n{user_context}<|end|>\n<|assistant|>\n"
 
-            inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
+            inputs = self.tokenizer(prompt, return_tensors="pt")
 
             with torch.no_grad():
                 outputs = self.model.generate(
                     **inputs,
-                    max_new_tokens=150,
+                    max_new_tokens=100,
                     temperature=0.7,
                     do_sample=True,
                     top_p=0.9,
@@ -96,7 +115,6 @@ class LocalAI:
 
             response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
 
-            # Извлекаем только ответ ассистента
             if "<|assistant|>" in response:
                 response = response.split("<|assistant|>")[-1].strip()
 
@@ -104,21 +122,19 @@ class LocalAI:
             return response
 
         except Exception as e:
-            logger.error(f"❌ Ошибка генерации ответа локальной моделью: {e}")
-            return "Извини, сейчас я немного занят. Попробуй ещё раз чуть позже."
+            logger.error(f"❌ Ошибка генерации: {e}")
+            return ("Извини, сейчас я немного загружен. Попробуй ещё раз чуть позже. "
+                    "А пока могу предложить сделать несколько глубоких вдохов — это помогает.")
 
+    # Заглушки для совместимости
     def analyze_sentiment(self, text: str) -> dict:
-        """Заглушка для совместимости с существующим кодом"""
         return {'label': 'NEUTRAL', 'score': 0.5}
 
     def analyze_emotion(self, text: str) -> dict:
-        """Заглушка для совместимости с существующим кодом"""
         return {'label': 'neutral', 'score': 0.5}
 
     def analyze_mood_trend(self, mood_history: list) -> dict:
-        """Заглушка для совместимости с существующим кодом"""
         return {'trend': 'stable', 'message': 'Продолжай в том же духе!', 'average': 2.5}
 
 
-# Создаём глобальный экземпляр
 local_ai = LocalAI()
