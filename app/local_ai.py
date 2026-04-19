@@ -121,7 +121,7 @@ class LocalAI:
                     do_sample=True,
                     top_p=0.9,
                     pad_token_id=self.tokenizer.eos_token_id,
-                    cache_implementation=None,  # ← ДОБАВИТЬ ЭТУ СТРОКУ
+                    use_cache=False,
                 )
 
             response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
