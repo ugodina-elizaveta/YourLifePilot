@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class LocalAI:
-    """Локальная модель LoRA r=2"""
+    """Локальная модель LoRA r=2 (без квантования)"""
 
     def __init__(self):
         self.model = None
@@ -22,7 +22,7 @@ class LocalAI:
         self.model_path = "/YourLifePilot/models/lora_r2"
 
     def load_model(self):
-        """Загружает модель"""
+        """Загружает модель в обычном формате (без bitsandbytes)"""
         if self.is_loaded:
             logger.info("Модель уже загружена")
             return
@@ -30,27 +30,27 @@ class LocalAI:
         try:
             logger.info("🚀 Загрузка локальной модели LoRA r=2...")
 
-            # Ограничиваем потоки
+            # Ограничиваем потоки для экономии памяти
             torch.set_num_threads(2)
             os.environ["OMP_NUM_THREADS"] = "2"
             os.environ["MKL_NUM_THREADS"] = "2"
 
             gc.collect()
 
-            # Токенизатор — используем без trust_remote_code
+            # Токенизатор
             self.tokenizer = AutoTokenizer.from_pretrained(
                 "microsoft/Phi-3.5-mini-instruct",
-                trust_remote_code=False,  # ← КЛЮЧЕВОЕ ИЗМЕНЕНИЕ
+                trust_remote_code=True
             )
             if self.tokenizer.pad_token is None:
                 self.tokenizer.pad_token = self.tokenizer.eos_token
 
-            # Базовая модель — без trust_remote_code
+            # Базовая модель (без квантования)
             base_model = AutoModelForCausalLM.from_pretrained(
                 "microsoft/Phi-3.5-mini-instruct",
                 device_map="cpu",
                 torch_dtype=torch.float32,
-                trust_remote_code=False,  # ← КЛЮЧЕВОЕ ИЗМЕНЕНИЕ
+                trust_remote_code=True,
                 use_cache=False,
                 low_cpu_mem_usage=True,
             )
@@ -65,6 +65,7 @@ class LocalAI:
             self.is_loaded = True
             logger.info("✅ Локальная модель LoRA r=2 успешно загружена")
 
+            # Логируем память
             memory_mb = psutil.Process().memory_info().rss / 1024 / 1024
             logger.info(f"📊 Использование RAM: {memory_mb:.0f} MB")
 
