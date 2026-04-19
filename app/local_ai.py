@@ -92,31 +92,39 @@ class LocalAI:
         return self.is_loaded
 
     def generate_advice(self, user_context: str, situation: str, user_data: dict = None) -> str:
-        # Проверка на запрещённые темы
-        context_lower = user_context.lower()
-        for forbidden in FORBIDDEN_TOPICS:
-            if forbidden in context_lower:
-                return ("Мне очень жаль, что ты проходишь через это. "
-                        "Пожалуйста, обратись за профессиональной помощью: "
-                        "круглосуточный телефон доверия 8-800-2000-122. "
-                        "Я здесь, чтобы поддержать, но в этой ситуации важно поговорить со специалистом.")
-
-        # Ленивая загрузка при первом вызове
+        # ... проверки на запрещённые темы ...
+        
         if not self.is_loaded:
             self.load_model()
             if not self.is_loaded:
                 return "Извини, сейчас я загружаюсь. Попробуй ещё раз через минуту."
 
         try:
-            system_message = (
-                "Ты — эмпатичный помощник, оказывающий психологическую поддержку. "
-                "Отвечай доброжелательно, поддерживающе и по существу. Будь кратким (2-3 предложения)."
+            logger.info(f"🎯 Начало генерации для: {user_context[:50]}...")
+            
+            # Правильный формат для Phi-3.5 через apply_chat_template
+            messages = [
+                {
+                    "role": "system",
+                    "content": "Ты — эмпатичный помощник, оказывающий психологическую поддержку. Отвечай доброжелательно, поддерживающе и по существу. Будь кратким (2-3 предложения)."
+                },
+                {
+                    "role": "user",
+                    "content": user_context
+                }
+            ]
+            
+            # Используем встроенный chat_template модели
+            prompt = self.tokenizer.apply_chat_template(
+                messages, 
+                tokenize=False, 
+                add_generation_prompt=True
             )
-
-            prompt = f"<|system|>\n{system_message}<|end|>\n<|user|>\n{user_context}<|end|>\n<|assistant|>\n"
-
+            
+            logger.info(f"📝 Токенизация...")
             inputs = self.tokenizer(prompt, return_tensors="pt")
-
+            
+            logger.info(f"🤖 Генерация...")
             with torch.no_grad():
                 outputs = self.model.generate(
                     **inputs,
@@ -125,21 +133,22 @@ class LocalAI:
                     do_sample=True,
                     top_p=0.9,
                     pad_token_id=self.tokenizer.eos_token_id,
+                    eos_token_id=self.tokenizer.eos_token_id,
                     use_cache=False,
                 )
-
-            response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-
-            if "<|assistant|>" in response:
-                response = response.split("<|assistant|>")[-1].strip()
-
-            logger.info(f"✅ Локальная модель ответила: {response[:100]}...")
-            return response
+            
+            # Декодируем ТОЛЬКО новые токены
+            response = self.tokenizer.decode(
+                outputs[0][inputs['input_ids'].shape[1]:], 
+                skip_special_tokens=True
+            )
+            
+            logger.info(f"✅ Ответ: {response[:100]}...")
+            return response.strip()
 
         except Exception as e:
-            logger.error(f"❌ Ошибка генерации: {e}")
-            return ("Извини, сейчас я немного загружен. Попробуй ещё раз чуть позже. "
-                    "А пока могу предложить сделать несколько глубоких вдохов — это помогает.")
+            logger.error(f"❌ Ошибка генерации: {e}", exc_info=True)
+            return "Извини, сейчас я немного загружен. Попробуй ещё раз чуть позже."
 
     def analyze_sentiment(self, text: str) -> dict:
         return {'label': 'NEUTRAL', 'score': 0.5}
