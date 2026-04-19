@@ -7,12 +7,13 @@ from peft import PeftModel
 from app.config import FORBIDDEN_TOPICS
 import gc
 import psutil
+import os
 
 logger = logging.getLogger(__name__)
 
 
 class LocalAI:
-    """Локальная модель LoRA r=2 в 8-битном формате (экономия памяти)"""
+    """Локальная модель LoRA r=2 с максимальной экономией памяти"""
 
     def __init__(self):
         self.model = None
@@ -21,21 +22,27 @@ class LocalAI:
         self.model_path = "/YourLifePilot/models/lora_r2"
 
     def load_model(self):
-        """Загружает модель в 8-битном формате"""
+        """Загружает модель с максимальной экономией памяти"""
         if self.is_loaded:
             return
 
         try:
-            logger.info("🚀 Загрузка локальной модели LoRA r=2 в 8-битном формате...")
+            logger.info("🚀 Загрузка локальной модели LoRA r=2...")
+
+            # Ограничиваем количество потоков PyTorch
+            torch.set_num_threads(2)
+            os.environ["OMP_NUM_THREADS"] = "2"
+            os.environ["MKL_NUM_THREADS"] = "2"
 
             # Принудительно очищаем память перед загрузкой
             gc.collect()
 
-            # 8-битная конфигурация (экономит больше памяти)
+            # 4-битная конфигурация (8-bit может требовать больше памяти при загрузке)
             bnb_config = BitsAndBytesConfig(
-                load_in_8bit=True,
-                llm_int8_threshold=6.0,
-                llm_int8_has_fp16_weight=False,
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=torch.float16,
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_quant_type="nf4",
             )
 
             # Токенизатор
@@ -46,12 +53,13 @@ class LocalAI:
             if self.tokenizer.pad_token is None:
                 self.tokenizer.pad_token = self.tokenizer.eos_token
 
-            # Загружаем базовую модель в 8-битном формате на CPU
+            # Загружаем базовую модель в 4-битном формате
+            # Используем device_map="auto" для автоматического распределения
             base_model = AutoModelForCausalLM.from_pretrained(
                 "microsoft/Phi-3.5-mini-instruct",
                 quantization_config=bnb_config,
-                device_map="cpu",
-                torch_dtype=torch.float32,
+                device_map="auto",
+                torch_dtype=torch.float16,
                 trust_remote_code=True,
                 use_cache=False,
                 low_cpu_mem_usage=True,
@@ -66,7 +74,7 @@ class LocalAI:
                 param.requires_grad = False
 
             self.is_loaded = True
-            logger.info("✅ Локальная модель LoRA r=2 успешно загружена (8-bit)")
+            logger.info("✅ Локальная модель LoRA r=2 успешно загружена (4-bit)")
 
             # Логируем использование памяти
             memory_mb = psutil.Process().memory_info().rss / 1024 / 1024
@@ -101,7 +109,7 @@ class LocalAI:
 
             prompt = f"<|system|>\n{system_message}<|end|>\n<|user|>\n{user_context}<|end|>\n<|assistant|>\n"
 
-            inputs = self.tokenizer(prompt, return_tensors="pt")
+            inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
 
             with torch.no_grad():
                 outputs = self.model.generate(
@@ -126,7 +134,6 @@ class LocalAI:
             return ("Извини, сейчас я немного загружен. Попробуй ещё раз чуть позже. "
                     "А пока могу предложить сделать несколько глубоких вдохов — это помогает.")
 
-    # Заглушки для совместимости
     def analyze_sentiment(self, text: str) -> dict:
         return {'label': 'NEUTRAL', 'score': 0.5}
 
