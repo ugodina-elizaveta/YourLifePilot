@@ -1,38 +1,33 @@
-# Локальная модель LoRA r=2 вместо YandexGPT
-
 import logging
 import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 from peft import PeftModel
-from app.config import FORBIDDEN_TOPICS
 
 logger = logging.getLogger(__name__)
 
 
 class LocalAI:
-    """Локальная модель LoRA r=2 для генерации эмпатичных ответов"""
-
     def __init__(self):
         self.model = None
         self.tokenizer = None
-        self.device = None
         self.is_loaded = False
         self.model_path = "/YourLifePilot/models/lora_r2"
 
     def load_model(self):
-        """Загружает модель LoRA r=2 в память"""
         if self.is_loaded:
-            logger.info("Модель уже загружена")
             return
 
         try:
-            logger.info("🚀 Загрузка локальной модели LoRA r=2...")
+            logger.info("🚀 Загрузка локальной модели LoRA r=2 в 4-битном формате...")
 
-            # Определяем устройство
-            self.device = "cuda" if torch.cuda.is_available() else "cpu"
-            logger.info(f"Используется устройство: {self.device}")
+            # 4-битная конфигурация для экономии памяти
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=torch.float16,
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_quant_type="nf4",
+            )
 
-            # Загружаем токенизатор
             self.tokenizer = AutoTokenizer.from_pretrained(
                 "microsoft/Phi-3.5-mini-instruct",
                 trust_remote_code=True
@@ -40,11 +35,12 @@ class LocalAI:
             if self.tokenizer.pad_token is None:
                 self.tokenizer.pad_token = self.tokenizer.eos_token
 
-            # Загружаем базовую модель
+            # Загружаем базовую модель в 4-битном формате (на CPU)
             base_model = AutoModelForCausalLM.from_pretrained(
                 "microsoft/Phi-3.5-mini-instruct",
-                device_map="auto" if torch.cuda.is_available() else None,
-                torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+                quantization_config=bnb_config,
+                device_map="cpu",  # принудительно на CPU
+                torch_dtype=torch.float16,
                 trust_remote_code=True,
                 use_cache=False,
             )
@@ -54,12 +50,11 @@ class LocalAI:
             self.model.eval()
 
             self.is_loaded = True
-            logger.info("✅ Локальная модель LoRA r=2 успешно загружена")
+            logger.info("✅ Локальная модель LoRA r=2 успешно загружена (4-bit)")
 
         except Exception as e:
             logger.error(f"❌ Ошибка загрузки локальной модели: {e}")
             self.is_loaded = False
-            raise
 
     def generate_advice(self, user_context: str, situation: str, user_data: dict = None) -> str:
         """
