@@ -169,7 +169,7 @@ VK_CONFIRMATION_CODE = os.getenv("VK_CONFIRMATION_CODE", "")
 async def vk_webhook(request: Request):
     data = await request.json()
     logger.info(f"VK confirmation request, group_id={data.get('group_id')}")
-    return '11c26ba2'
+    return PlainTextResponse(VK_CONFIRMATION_CODE)
 
 
 if __name__ == "__main__":
