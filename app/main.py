@@ -165,11 +165,29 @@ VK_CONFIRMATION_CODE = os.getenv("VK_CONFIRMATION_CODE", "")
 
 
 # ---- НОВЫЙ ЭНДПОИНТ ДЛЯ VK ----
-@app.post("/vk-webhook")
+@app.api_route("/vk-webhook", methods=["POST", "GET"])
 async def vk_webhook(request: Request):
-    data = await request.json()
-    logger.info(f"VK confirmation request, group_id={data.get('group_id')}")
-    return PlainTextResponse(VK_CONFIRMATION_CODE)
+    try:
+        data = await request.json()
+    except Exception as e:
+        logger.error(f"Failed to parse JSON: {e}")
+        return PlainTextResponse("error")
+
+    event_type = data.get("type")
+    logger.info(f"VK event: {event_type}")
+
+    if event_type == "confirmation":
+        logger.info(f"VK confirmation request, group_id={data.get('group_id')}")
+        return PlainTextResponse(VK_CONFIRMATION_CODE)
+
+    if event_type == "message_new":
+        logger.info(f"New message from VK: {data}")
+        message = data["object"]["message"]
+        await vk_bot.process_message(message)
+        return {"ok": True}
+
+    logger.warning(f"Unknown VK event: {event_type}")
+    return {"ok": False, "error": "unsupported event"}
 
 
 if __name__ == "__main__":
