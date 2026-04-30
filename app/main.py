@@ -2,7 +2,8 @@ import logging
 import os
 import sys
 from datetime import datetime
-
+from starlette.responses import PlainTextResponse
+from app.vk_module.vk_bot import vk_bot
 from fastapi import Request
 from telegram import Update
 
@@ -158,6 +159,31 @@ async def trigger_day_webhook(user_id: str = None):
     except Exception as e:
         logger.error(f"Error in trigger-day: {e}")
         return {"ok": False, "error": str(e)}
+
+
+VK_CONFIRMATION_CODE = os.getenv("VK_CONFIRMATION_CODE", "")
+
+
+# ---- НОВЫЙ ЭНДПОИНТ ДЛЯ VK ----
+@app.api_route("/vk-webhook", methods=["POST", "GET"])
+async def vk_webhook(request: Request):
+    data = await request.json()
+    event_type = data.get("type")
+
+    # Подтверждение сервера Callback API
+    if event_type == "confirmation":
+        logger.info(f"VK confirmation request, group_id={data.get('group_id')}")
+        return PlainTextResponse(VK_CONFIRMATION_CODE)
+
+    # Входящее сообщение
+    if event_type == "message_new":
+        message = data["object"]["message"]
+        await vk_bot.process_message(message)
+        return {"ok": True}
+
+    # Можно обработать другие события при необходимости
+    logger.warning(f"Unknown VK event: {event_type}")
+    return {"ok": False, "error": "unsupported event"}
 
 
 if __name__ == "__main__":

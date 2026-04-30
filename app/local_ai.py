@@ -29,7 +29,7 @@ class LocalAI:
 
         try:
             logger.info("🚀 Загрузка локальной модели LoRA r=2...")
-            
+
             # Проверяем доступную память
             available_ram_gb = psutil.virtual_memory().available / (1024**3)
             logger.info(f"📊 Доступно RAM: {available_ram_gb:.1f} GB")
@@ -38,17 +38,14 @@ class LocalAI:
             torch.set_num_threads(2)
             os.environ["OMP_NUM_THREADS"] = "2"
             os.environ["MKL_NUM_THREADS"] = "2"
-            
+
             # Очищаем память
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
             logger.info("📥 Загрузка токенизатора...")
-            self.tokenizer = AutoTokenizer.from_pretrained(
-                "microsoft/Phi-3.5-mini-instruct",
-                trust_remote_code=True
-            )
+            self.tokenizer = AutoTokenizer.from_pretrained("microsoft/Phi-3.5-mini-instruct", trust_remote_code=True)
             if self.tokenizer.pad_token is None:
                 self.tokenizer.pad_token = self.tokenizer.eos_token
 
@@ -63,7 +60,7 @@ class LocalAI:
                 low_cpu_mem_usage=True,
                 attn_implementation="eager",  # Без flash attention
             )
-            
+
             # Логируем память после загрузки базы
             memory_mb = psutil.Process().memory_info().rss / 1024 / 1024
             logger.info(f"📊 RAM после базы: {memory_mb:.0f} MB")
@@ -93,7 +90,7 @@ class LocalAI:
 
     def generate_advice(self, user_context: str, situation: str, user_data: dict = None) -> str:
         # ... проверки на запрещённые темы ...
-        
+
         if not self.is_loaded:
             self.load_model()
             if not self.is_loaded:
@@ -101,29 +98,22 @@ class LocalAI:
 
         try:
             logger.info(f"🎯 Начало генерации для: {user_context[:50]}...")
-            
+
             # Правильный формат для Phi-3.5 через apply_chat_template
             messages = [
                 {
                     "role": "system",
-                    "content": "Ты — эмпатичный помощник, оказывающий психологическую поддержку. Отвечай доброжелательно, поддерживающе и по существу. Будь кратким (2-3 предложения)."
+                    "content": "Ты — эмпатичный помощник, оказывающий психологическую поддержку. Отвечай доброжелательно, поддерживающе и по существу. Будь кратким (2-3 предложения).",
                 },
-                {
-                    "role": "user",
-                    "content": user_context
-                }
+                {"role": "user", "content": user_context},
             ]
-            
+
             # Используем встроенный chat_template модели
-            prompt = self.tokenizer.apply_chat_template(
-                messages, 
-                tokenize=False, 
-                add_generation_prompt=True
-            )
-            
+            prompt = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+
             logger.info(f"📝 Токенизация...")
             inputs = self.tokenizer(prompt, return_tensors="pt")
-            
+
             logger.info(f"🤖 Генерация...")
             with torch.no_grad():
                 outputs = self.model.generate(
@@ -136,13 +126,10 @@ class LocalAI:
                     eos_token_id=self.tokenizer.eos_token_id,
                     use_cache=False,
                 )
-            
+
             # Декодируем ТОЛЬКО новые токены
-            response = self.tokenizer.decode(
-                outputs[0][inputs['input_ids'].shape[1]:], 
-                skip_special_tokens=True
-            )
-            
+            response = self.tokenizer.decode(outputs[0][inputs['input_ids'].shape[1] :], skip_special_tokens=True)
+
             logger.info(f"✅ Ответ: {response[:100]}...")
             return response.strip()
 

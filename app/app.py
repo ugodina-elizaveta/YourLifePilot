@@ -73,17 +73,17 @@ async def lifespan(app: FastAPI):
             else:
                 logger.error("❌ Не удалось установить webhook")
 
-        # 5. Загружаем локальную AI-модель (LoRA r=2) при старте
-        try:
-            from app.local_ai import local_ai
-            logger.info("🤖 Предварительная загрузка локальной модели LoRA r=2...")
-            local_ai.load_model()
-            if local_ai.is_loaded:
-                logger.info("✅ Локальная модель успешно загружена")
-            else:
-                logger.warning("⚠️ Локальная модель не загрузилась, будет использоваться YandexGPT")
-        except Exception as e:
-            logger.error(f"❌ Ошибка при загрузке локальной модели: {e}")
+        # # 5. Загружаем локальную AI-модель (LoRA r=2) при старте
+        # try:
+        #     from app.local_ai import local_ai
+        #     logger.info("🤖 Предварительная загрузка локальной модели LoRA r=2...")
+        #     local_ai.load_model()
+        #     if local_ai.is_loaded:
+        #         logger.info("✅ Локальная модель успешно загружена")
+        #     else:
+        #         logger.warning("⚠️ Локальная модель не загрузилась, будет использоваться YandexGPT")
+        # except Exception as e:
+        #     logger.error(f"❌ Ошибка при загрузке локальной модели: {e}")
 
         # 6. Запускаем планировщик
         scheduler_task = asyncio.create_task(run_scheduler())
