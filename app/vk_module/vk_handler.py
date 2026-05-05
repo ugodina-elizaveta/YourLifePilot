@@ -128,7 +128,8 @@ class VkHandler:
                     }
                 ]
             )
-        return {"one_time": one_time, "buttons": keyboard_buttons, "inline": True}
+        # Для inline-клавиатур НЕЛЬЗЯ использовать one_time
+        return {"buttons": keyboard_buttons, "inline": True}
 
     # ---------- Онбординг ----------
     async def start(self, user_id):

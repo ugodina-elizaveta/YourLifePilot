@@ -1,7 +1,7 @@
 import logging
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from starlette.responses import PlainTextResponse
 from app.vk_module.vk_bot import vk_bot
 from fastapi import Request
@@ -163,8 +163,10 @@ async def trigger_day_webhook(user_id: str = None):
 
 VK_CONFIRMATION_CODE = os.getenv("VK_CONFIRMATION_CODE", "")
 
+# Словарь для отслеживания обработанных сообщений
+processed_messages = {}
 
-# ---- НОВЫЙ ЭНДПОИНТ ДЛЯ VK ----
+
 @app.api_route("/vk-webhook", methods=["POST", "GET"])
 async def vk_webhook(request: Request):
     try:
@@ -174,20 +176,36 @@ async def vk_webhook(request: Request):
         return PlainTextResponse("error")
 
     event_type = data.get("type")
-    logger.info(f"VK event: {event_type}")
 
     if event_type == "confirmation":
         logger.info(f"VK confirmation request, group_id={data.get('group_id')}")
         return PlainTextResponse(VK_CONFIRMATION_CODE)
 
     if event_type == "message_new":
-        logger.info(f"New message from VK: {data}")
         message = data["object"]["message"]
+        message_id = str(message.get("conversation_message_id", message.get("id")))
+        from_id = str(message.get("from_id"))
+
+        # Проверяем, не обработано ли уже это сообщение
+        msg_key = f"{from_id}_{message_id}"
+        if msg_key in processed_messages:
+            logger.info(f"Duplicate message ignored: {msg_key}")
+            return {"ok": True}
+
+        # Отмечаем как обработанное
+        processed_messages[msg_key] = datetime.now()
+
+        # Очищаем старые записи (старше 5 минут)
+        cutoff = datetime.now() - timedelta(minutes=5)
+        processed_messages = {k: v for k, v in processed_messages.items() if v > cutoff}
+
+        logger.info(f"New message from VK user {from_id}: {message.get('text')}")
         await vk_bot.process_message(message)
         return {"ok": True}
 
-    logger.warning(f"Unknown VK event: {event_type}")
-    return {"ok": False, "error": "unsupported event"}
+    # Игнорируем другие события (message_read, message_typing_state и т.д.)
+    logger.debug(f"VK event ignored: {event_type}")
+    return {"ok": True}
 
 
 if __name__ == "__main__":
