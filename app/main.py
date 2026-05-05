@@ -89,8 +89,6 @@ async def trigger_day_webhook(user_id: str = None):
 # ============================================================
 # VK CALLBACK API
 # ============================================================
-
-
 @app.api_route("/vk-webhook", methods=["POST", "GET"])
 async def vk_webhook(request: Request):
     global processed_messages, last_activity
@@ -115,24 +113,39 @@ async def vk_webhook(request: Request):
         message_id = str(message.get("conversation_message_id", message.get("id")))
         from_id = str(message.get("from_id"))
 
-        # Защита от дубликатов
         msg_key = f"{from_id}_{message_id}"
         if msg_key in processed_messages:
             logger.debug(f"Duplicate message ignored: {msg_key}")
-            return {"ok": True}
+            return PlainTextResponse("ok")
 
         processed_messages[msg_key] = datetime.now()
-
-        # Очистка старых записей (старше 5 минут)
         cutoff = datetime.now() - timedelta(minutes=5)
         processed_messages = {k: v for k, v in processed_messages.items() if v > cutoff}
 
         logger.info(f"New message from VK user {from_id}: {message.get('text', '')[:50]}")
         await vk_bot.process_message(message)
-        return {"ok": True}
+        return PlainTextResponse("ok")
 
-    # Все остальные события игнорируем
-    return {"ok": True}
+    # Нажатие на callback-кнопку
+    if event_type == "message_event":
+        last_activity = datetime.now()
+        event_data = data["object"]
+        user_id = str(event_data.get("user_id"))
+        payload = event_data.get("payload", {})
+
+        # payload уже словарь, не нужно json.loads
+        if isinstance(payload, str):
+            import json
+
+            payload = json.loads(payload)
+
+        cmd = payload.get("cmd", "")
+        logger.info(f"VK callback from {user_id}: {cmd}")
+        await vk_bot.handler.handle(user_id, "", cmd)
+        return PlainTextResponse("ok")
+
+    # Все остальные события
+    return PlainTextResponse("ok")
 
 
 # ============================================================
