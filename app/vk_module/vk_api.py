@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import random
 from typing import Optional
 
 import aiohttp
@@ -45,7 +46,7 @@ class VkApi:
         params = {
             'user_id': user_id,
             'message': message,
-            'random_id': 0,  # VK сгенерирует сам
+            'random_id': random.randint(100000, 2**31 - 1),  # было 0
         }
         if keyboard:
             params['keyboard'] = json.dumps(keyboard)
@@ -53,15 +54,11 @@ class VkApi:
             params['attachment'] = attachment
         result = await self._call('messages.send', params)
         if result is not None:
-            logger.info(f"✅ Сообщение отправлено пользователю {user_id}")
+            logger.info(f"✅ Сообщение отправлено пользователю {user_id} (id={result})")
+            return result
         else:
             logger.error(f"❌ Не удалось отправить сообщение пользователю {user_id}")
-        # Обычно возвращает словарь с peer_id, message_id, но может быть int (ID)
-        if isinstance(result, dict):
-            return result.get('message_id')
-        elif isinstance(result, int):
-            return result
-        return None
+            return None
 
     async def get_user_info(self, user_ids: list[int]) -> Optional[list[dict]]:
         result = await self._call(
