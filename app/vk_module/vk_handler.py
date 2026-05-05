@@ -43,23 +43,18 @@ logger = logging.getLogger(__name__)
 class VkHandler:
     def __init__(self, api):
         self.api = api
-        # Состояния онбординга (только те, где нужна обработка текста)
         self.text_states = {
             'PHYSICAL_DETAILS': self.physical_details_text,
         }
 
     async def handle(self, user_id: str, text: str, cmd: str = None):
-        """Главный роутер сообщений"""
-        # Игнорируем пустые сообщения
         if not text and not cmd:
             return
 
-        # Обработка callback-команд (от инлайн-кнопок)
         if cmd:
             await self.handle_callback(user_id, cmd)
             return
 
-        # Специальные текстовые команды
         if text == '/start' or text.lower() == 'начать':
             await self.start(user_id)
             return
@@ -70,16 +65,13 @@ class VkHandler:
             await self.stop_ai_chat(user_id)
             return
 
-        # Проверяем состояние онбординга (текстовый ввод)
         state = user_data_store.get(user_id, {}).get('vk_state')
         if state and state in self.text_states:
             await self.text_states[state](user_id, text)
             return
 
-        # Остальное — свободный текст (AI-чат или просто сообщение)
         await self.process_free_text(user_id, text)
 
-    # ---------- Вспомогательные методы ----------
     def init_user(self, user_id):
         if user_id not in user_data_store:
             user_data_store[user_id] = {
@@ -112,12 +104,9 @@ class VkHandler:
             }
 
     async def send_message(self, user_id: str, text: str, keyboard: dict = None):
-        """Отправка сообщения с клавиатурой"""
         await self.api.send_message(int(user_id), text, keyboard)
 
     def simple_keyboard(self, buttons_dict: dict, one_time=False):
-        """Создаёт inline-клавиатуру.
-        buttons_dict: {label: cmd} — cmd будет в payload как {"cmd": cmd}"""
         keyboard_buttons = []
         for label, cmd in buttons_dict.items():
             keyboard_buttons.append(
@@ -128,29 +117,21 @@ class VkHandler:
                     }
                 ]
             )
-        # Для inline-клавиатур НЕЛЬЗЯ использовать one_time
         return {"buttons": keyboard_buttons, "inline": True}
 
-    # ---------- Онбординг ----------
+    # --- онбординг ---
     async def start(self, user_id):
         self.init_user(user_id)
-        # Принудительно сбрасываем ключевые поля для нового онбординга,
-        # даже если пользователь уже был в кэше
         user_data_store[user_id]['scenario'] = []
         user_data_store[user_id]['answers'] = {}
         user_data_store[user_id]['onboarding_complete'] = False
         user_data_store[user_id]['vk_state'] = 'AGREEMENT'
-
         await self.send_message(user_id, WELCOME_TEXT)
         await self.send_message(
-            user_id,
-            DISCLAIMER_TEXT,
-            keyboard=self.simple_keyboard({"✅ Понимаю и согласен(на)": "agree"}, one_time=True),
+            user_id, DISCLAIMER_TEXT, keyboard=self.simple_keyboard({"✅ Понимаю и согласен(на)": "agree"})
         )
 
-    # ---------- Текстовые обработчики онбординга ----------
     async def physical_details_text(self, user_id, text):
-        """Обработка свободного ввода ограничений"""
         user_data_store[user_id]['physical_limits'] = text
         await self.send_message(user_id, "Спасибо! Я учту это при подборе рекомендаций.")
         await db.save_user(user_id, user_data_store[user_id])
@@ -161,17 +142,13 @@ class VkHandler:
             keyboard=self.simple_keyboard({opt: f"freq_{i}" for i, opt in enumerate(NOTIFICATION_FREQUENCY_OPTIONS)}),
         )
 
-    # ---------- Обработка всех колбэков ----------
+    # --- callback-роутер ---
     async def handle_callback(self, user_id: str, cmd: str):
         logger.info(f"VK callback from {user_id}: {cmd}")
 
-        # Нормализация answers (убедимся, что это словарь)
         if not isinstance(user_data_store[user_id].get('answers'), dict):
             user_data_store[user_id]['answers'] = {}
-        """Обработка всех callback-команд (от инлайн-кнопок)"""
-        logger.info(f"VK callback from {user_id}: {cmd}")
 
-        # Проверяем, что callback соответствует текущему состоянию
         state = user_data_store.get(user_id, {}).get('vk_state')
         expected_prefix = {
             'AGREEMENT': 'agree',
@@ -180,7 +157,7 @@ class VkHandler:
             'MORNING_TIME': 'morning_time_',
             'EVENING_TIME': 'evening_time_',
             'PHYSICAL_LIMITS': 'physical_',
-            'PHYSICAL_DETAILS': None,  # текстовый ввод
+            'PHYSICAL_DETAILS': None,
             'NOTIFICATION_FREQ': 'freq_',
             'DAILY_TIME': 'daily_time_',
             'BIWEEKLY_TIME': 'biweekly_time_',
@@ -191,16 +168,15 @@ class VkHandler:
             'Q5': 'q5_',
         }.get(state)
 
-        # Команды планировщика (morning_, evening_, feeling_, day_stress_) разрешены всегда
         if cmd.startswith(('morning_', 'evening_', 'feeling_', 'day_stress_')):
-            pass  # продолжаем обработку
+            pass  # разрешены всегда
         elif cmd == 'agree' and state != 'AGREEMENT':
             return
         elif expected_prefix and not cmd.startswith(expected_prefix):
-            logger.warning(f"Ignored callback {cmd} (expected prefix {expected_prefix}, state {state})")
+            logger.warning(f"Ignored callback {cmd} (expected {expected_prefix}, state {state})")
             return
 
-        # === ОНБОРДИНГ ===
+        # --- онбординг ---
         if cmd == 'agree':
             user_data_store[user_id]['vk_state'] = 'AGE'
             await self.send_message(user_id, "Отлично! Давай познакомимся поближе.")
@@ -280,14 +256,14 @@ class VkHandler:
             answer = NOTIFICATION_FREQUENCY_OPTIONS[idx]
             user_data_store[user_id]['notification_frequency'] = answer
             await db.save_user(user_id, user_data_store[user_id])
-            if idx == 1:  # 1 сообщение в день
+            if idx == 1:
                 user_data_store[user_id]['vk_state'] = 'DAILY_TIME'
                 await self.send_message(
                     user_id,
                     DAILY_TIME_QUESTION,
                     keyboard=self.simple_keyboard({opt: f"daily_time_{i}" for i, opt in enumerate(DAILY_TIME_OPTIONS)}),
                 )
-            elif idx == 2:  # Раз в пару дней
+            elif idx == 2:
                 user_data_store[user_id]['vk_state'] = 'BIWEEKLY_TIME'
                 await self.send_message(
                     user_id,
@@ -309,8 +285,11 @@ class VkHandler:
             idx = int(cmd.split('_')[2])
             answer = DAILY_TIME_OPTIONS[idx]
             user_data_store[user_id]['daily_time'] = answer
-            time_map = {"Утром (08:00-10:00)": "09:00", "Днём (13:00-15:00)": "14:00", "Вечером (19:00-21:00)": "20:00"}
-            user_data_store[user_id]['morning_time'] = time_map.get(answer, "09:00")
+            user_data_store[user_id]['morning_time'] = {
+                "Утром (08:00-10:00)": "09:00",
+                "Днём (13:00-15:00)": "14:00",
+                "Вечером (19:00-21:00)": "20:00",
+            }.get(answer, "09:00")
             user_data_store[user_id]['evening_time'] = None
             user_data_store[user_id]['vk_state'] = 'Q1'
             await db.save_user(user_id, user_data_store[user_id])
@@ -323,8 +302,11 @@ class VkHandler:
             idx = int(cmd.split('_')[2])
             answer = BIWEEKLY_TIME_OPTIONS[idx]
             user_data_store[user_id]['biweekly_time'] = answer
-            time_map = {"Утром (08:00-10:00)": "09:00", "Днём (13:00-15:00)": "14:00", "Вечером (19:00-21:00)": "20:00"}
-            user_data_store[user_id]['morning_time'] = time_map.get(answer, "09:00")
+            user_data_store[user_id]['morning_time'] = {
+                "Утром (08:00-10:00)": "09:00",
+                "Днём (13:00-15:00)": "14:00",
+                "Вечером (19:00-21:00)": "20:00",
+            }.get(answer, "09:00")
             user_data_store[user_id]['evening_time'] = None
             user_data_store[user_id]['notification_skip_days'] = 1
             user_data_store[user_id]['vk_state'] = 'Q1'
@@ -334,7 +316,7 @@ class VkHandler:
                 user_id, Q1_TEXT, keyboard=self.simple_keyboard({opt: f"q1_{i}" for i, opt in enumerate(Q1_OPTIONS)})
             )
 
-        # === ВОПРОСЫ ПРО СОН ===
+        # --- вопросы про сон ---
         elif cmd.startswith('q1_'):
             idx = int(cmd.split('_')[1])
             answer = Q1_OPTIONS[idx]
@@ -403,17 +385,14 @@ class VkHandler:
                     "occupation": user_data_store[user_id]['occupation'],
                 },
             )
-            final_message = (
-                "🎉 Спасибо за ответы! "
-                f"Твой сценарий: {', '.join(user_data_store[user_id]['scenario']) if user_data_store[user_id]['scenario'] else 'баланс'}.\n"
-                f"📅 Утренние сообщения — {user_data_store[user_id]['morning_time']}, "
-                f"вечерние — {user_data_store[user_id]['evening_time']}.\n\n"
-                "🤖 Пиши /ai, чтобы пообщаться с ИИ-помощником.\n"
-                "Я здесь, чтобы поддержать тебя каждый день! 🌟"
+            final = (
+                f"🎉 Спасибо за ответы! Твой сценарий: {', '.join(user_data_store[user_id]['scenario']) if user_data_store[user_id]['scenario'] else 'баланс'}.\n"
+                f"📅 Утренние — {user_data_store[user_id]['morning_time']}, вечерние — {user_data_store[user_id]['evening_time']}.\n\n"
+                "🤖 Пиши /ai для общения с ИИ.\nЯ рядом каждый день! 🌟"
             )
-            await self.send_message(user_id, final_message)
+            await self.send_message(user_id, final)
 
-        # === КОЛБЭКИ ОТ ПЛАНИРОВЩИКА ===
+        # --- колбэки рассылок ---
         elif cmd.startswith('morning_'):
             await self.morning_action_handler(user_id, cmd)
         elif cmd.startswith('morning_micro_'):
@@ -427,19 +406,17 @@ class VkHandler:
         else:
             logger.warning(f"Unhandled callback: {cmd}")
 
-    # ---------- AI-ЧАТ ----------
+    # --- AI чат ---
     async def process_free_text(self, user_id, text):
         if user_data_store.get(user_id, {}).get('ai_chat_mode'):
             await self.ai_chat(user_id, text)
         else:
-            await self.send_message(user_id, "Напишите /ai, чтобы пообщаться с ИИ-помощником, или /start для начала.")
+            await self.send_message(user_id, "Напишите /ai для общения с ИИ или /start.")
 
     async def start_ai_chat(self, user_id):
         user_data_store[user_id]['ai_chat_mode'] = True
         user_data_store[user_id]['ai_chat_session_id'] = str(uuid.uuid4())
-        await self.send_message(
-            user_id, "🤖 Режим общения с AI активирован! Задавай вопросы или делись переживаниями.\n/stop_ai — выйти."
-        )
+        await self.send_message(user_id, "🤖 Режим AI активирован! Задавай вопросы.\n/stop_ai — выйти.")
 
     async def stop_ai_chat(self, user_id):
         user_data_store[user_id]['ai_chat_mode'] = False
@@ -456,14 +433,12 @@ class VkHandler:
         await self.send_message(user_id, advice)
         await db.save_ai_chat_message(user_id, session_id, advice, "assistant", metadata={"situation": situation})
 
-    # ---------- ОБРАБОТЧИКИ РАССЫЛОК ----------
+    # --- обработчики рассылок (логика остаётся без изменений) ---
     async def morning_action_handler(self, user_id, cmd):
         if cmd == 'morning_normal':
-            text = "Рад слышать! Хорошего дня."
             user_stats_store[user_id]['morning_skip_streak'] = 0
             await db.save_action(user_id, "morning", "normal")
-            await self.send_message(user_id, text)
-
+            await self.send_message(user_id, "Рад слышать! Хорошего дня.")
         elif cmd == 'morning_broken':
             user_data = user_data_store.get(user_id, {})
             advice = ai.generate_advice(
@@ -481,7 +456,6 @@ class VkHandler:
             else:
                 await self.send_message(user_id, f"Жаль. {advice}")
                 await db.save_action(user_id, "morning", "broken_without_scenario")
-
         elif cmd == 'morning_unknown':
             await self.send_message(user_id, "Хорошо, понаблюдай за собой. Если будет нужна поддержка, я рядом.")
             await db.save_action(user_id, "morning", "unknown")
@@ -556,7 +530,7 @@ class VkHandler:
                 user_data=user_data_store.get(user_id, {}),
             )
             await self.send_message(user_id, f"💡 {advice}")
-            await self.send_message(user_id, "Если чувствуешь напряжение, можешь рассказать мне об этом в режиме /ai.")
+            await self.send_message(user_id, "Если чувствуешь напряжение, можешь рассказать мне в режиме /ai.")
 
     async def day_stress_handler(self, user_id, cmd):
         today = datetime.now().date()
