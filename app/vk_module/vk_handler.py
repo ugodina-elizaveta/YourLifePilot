@@ -396,6 +396,7 @@ class VkHandler:
         elif cmd.startswith('morning_'):
             await self.morning_action_handler(user_id, cmd)
         elif cmd.startswith('morning_micro_'):
+            logger.info('morning_micro_')
             await self.morning_micro_handler(user_id, cmd)
         elif cmd.startswith('evening_'):
             await self.evening_action_handler(user_id, cmd)
@@ -461,8 +462,10 @@ class VkHandler:
             await db.save_action(user_id, "morning", "unknown")
 
     async def morning_micro_handler(self, user_id, cmd):
+        logger.info('morning_micro_handler start')
         today = datetime.now().date()
         if cmd == 'morning_micro_done':
+            logger.info('morning_micro_done start')
             user_stats_store[user_id]['morning_streak'] = user_stats_store[user_id].get('morning_streak', 0) + 1
             user_stats_store[user_id]['morning_skip_streak'] = 0
             user_stats_store[user_id]['last_action_date']['morning'] = today
@@ -470,6 +473,7 @@ class VkHandler:
             await db.save_user_stats(user_id, user_stats_store[user_id])
             await self.send_message(user_id, "Отлично! Маленький шаг сделан. Так держать!")
         elif cmd == 'morning_micro_later':
+            logger.info('morning_micro_later start')
             user_stats_store[user_id]['morning_skip_streak'] = (
                 user_stats_store[user_id].get('morning_skip_streak', 0) + 1
             )
