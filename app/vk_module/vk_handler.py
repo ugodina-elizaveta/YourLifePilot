@@ -393,11 +393,11 @@ class VkHandler:
             await self.send_message(user_id, final)
 
         # --- колбэки рассылок ---
-        elif cmd.startswith('morning_'):
-            await self.morning_action_handler(user_id, cmd)
         elif cmd.startswith('morning_micro_'):
             logger.info('morning_micro_')
             await self.morning_micro_handler(user_id, cmd)
+        elif cmd.startswith('morning_'):
+            await self.morning_action_handler(user_id, cmd)
         elif cmd.startswith('evening_'):
             await self.evening_action_handler(user_id, cmd)
         elif cmd.startswith('feeling_'):
