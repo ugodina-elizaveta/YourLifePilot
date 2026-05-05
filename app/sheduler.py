@@ -5,10 +5,8 @@ import time
 from datetime import datetime
 from typing import Optional
 
-from telegram.ext import ContextTypes
-
 # from app.ai import ai
-from app.bot_app import bot_app
+# from app.bot_app import bot_app
 from app.config import user_data_store, user_stats_store
 from app.menu import get_simple_keyboard
 from app.vk_module.vk_bot import vk_bot
@@ -17,8 +15,6 @@ logger = logging.getLogger(__name__)
 
 
 # ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
-
-
 def vk_simple_keyboard(buttons_dict: dict, one_time=False):
     """Создаёт inline-клавиатуру для VK.
     buttons_dict: {label: cmd}"""
@@ -86,7 +82,7 @@ def is_vk_user(user_id: str) -> bool:
 # ========== УТРЕННЯЯ РАССЫЛКА ==========
 
 
-async def send_morning_message(context: ContextTypes.DEFAULT_TYPE, target_user_id: Optional[str] = None):
+async def send_morning_message(target_user_id: Optional[str] = None):
     """Отправляет утреннее сообщение (Telegram и VK)"""
     start_time = time.time()
 
@@ -148,7 +144,7 @@ async def send_morning_message(context: ContextTypes.DEFAULT_TYPE, target_user_i
                     "🥱 Разбит(а)": "morning_broken",
                     "😐 Пока непонятно": "morning_unknown",
                 }
-                success = await send_message_with_retry(context.bot, user_id, text, keyboard)
+                success = await send_message_with_retry(user_id, text, keyboard)
 
             if success:
                 sent_count += 1
@@ -166,7 +162,7 @@ async def send_morning_message(context: ContextTypes.DEFAULT_TYPE, target_user_i
 # ========== ВЕЧЕРНЯЯ РАССЫЛКА ==========
 
 
-async def send_evening_message(context: ContextTypes.DEFAULT_TYPE, target_user_id: Optional[str] = None):
+async def send_evening_message(target_user_id: Optional[str] = None):
     """Отправляет вечернее сообщение (Telegram и VK)"""
     start_time = time.time()
 
@@ -226,7 +222,7 @@ async def send_evening_message(context: ContextTypes.DEFAULT_TYPE, target_user_i
                 success = await vk_send_message_with_retry(user_id, text, keyboard)
             else:
                 keyboard = buttons
-                success = await send_message_with_retry(context.bot, user_id, text, keyboard)
+                success = await send_message_with_retry(user_id, text, keyboard)
 
             if success:
                 sent_count += 1
@@ -242,9 +238,7 @@ async def send_evening_message(context: ContextTypes.DEFAULT_TYPE, target_user_i
 
 
 # ========== ДНЕВНАЯ РАССЫЛКА ==========
-
-
-async def send_day_stress_message(context: ContextTypes.DEFAULT_TYPE, target_user_id: Optional[str] = None):
+async def send_day_stress_message(target_user_id: Optional[str] = None):
     """Отправляет дневное сообщение (Telegram и VK)"""
     if not user_data_store:
         return
@@ -290,7 +284,7 @@ async def send_day_stress_message(context: ContextTypes.DEFAULT_TYPE, target_use
                 success = await vk_send_message_with_retry(user_id, text, keyboard)
             else:
                 keyboard = buttons
-                success = await send_message_with_retry(context.bot, user_id, text, keyboard)
+                success = await send_message_with_retry(user_id, text, keyboard)
 
             if success:
                 sent_count += 1
@@ -304,12 +298,10 @@ async def send_day_stress_message(context: ContextTypes.DEFAULT_TYPE, target_use
 
 
 # ========== ПЛАНИРОВЩИК ==========
-
-
 async def run_scheduler():
-    """Планировщик для периодических рассылок с учётом персонального времени"""
+    """Планировщик для VK"""
     logger.info("=" * 60)
-    logger.info("🕐 ПЛАНИРОВЩИК ЗАПУЩЕН")
+    logger.info("🕐 ПЛАНИРОВЩИК ЗАПУЩЕН (VK Only)")
     logger.info(f"🕐 Текущее время сервера: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     logger.info("=" * 60)
 
@@ -331,67 +323,49 @@ async def run_scheduler():
                 if morning_time is None:
                     morning_time = '09:00'
 
-                # Утренняя рассылка
+                # Утренняя рассылка (только VK)
                 try:
                     morning_hour, morning_min = map(int, morning_time.split(':'))
                     if current_time.hour == morning_hour and current_time.minute == morning_min:
                         if should_send_message(user_id, 'morning'):
-                            logger.info(f"🎯 [УТРО] Рассылка {user_id} в {morning_time}")
-
-                            class DummyContext:
-                                def __init__(self, bot):
-                                    self.bot = bot
-
-                            dummy_context = DummyContext(bot_app.bot)
-                            await send_morning_message(dummy_context, target_user_id=user_id)
+                            logger.info(f"🎯 [УТРО VK] Рассылка {user_id} в {morning_time}")
+                            await send_morning_message(user_id)
                             await asyncio.sleep(60)
                 except (ValueError, TypeError):
                     pass
 
-                # Вечерняя рассылка
+                # Вечерняя рассылка (только VK)
                 if evening_time is not None:
                     try:
                         evening_hour, evening_min = map(int, evening_time.split(':'))
                         if current_time.hour == evening_hour and current_time.minute == evening_min:
                             if should_send_message(user_id, 'evening'):
-                                logger.info(f"🎯 [ВЕЧЕР] Рассылка {user_id} в {evening_time}")
-
-                                class DummyContext:
-                                    def __init__(self, bot):
-                                        self.bot = bot
-
-                                dummy_context = DummyContext(bot_app.bot)
-                                await send_evening_message(dummy_context, target_user_id=user_id)
+                                logger.info(f"🎯 [ВЕЧЕР VK] Рассылка {user_id} в {evening_time}")
+                                await send_evening_message(user_id)
                                 await asyncio.sleep(60)
                     except (ValueError, TypeError):
                         pass
 
-                # Дневная рассылка в 15:00
+                # Дневная рассылка (только VK)
                 if current_time.hour == 15 and current_time.minute == 0:
                     if should_send_message(user_id, 'day'):
                         if 'днём высокий стресс' in data.get('scenario', []):
-                            logger.info(f"🎯 [ДЕНЬ] Рассылка {user_id}")
-
-                            class DummyContext:
-                                def __init__(self, bot):
-                                    self.bot = bot
-
-                            dummy_context = DummyContext(bot_app.bot)
-                            await send_day_stress_message(dummy_context, target_user_id=user_id)
+                            logger.info(f"🎯 [ДЕНЬ VK] Рассылка {user_id}")
+                            await send_day_stress_message(user_id)
                             await asyncio.sleep(60)
 
             if check_counter % 120 == 0:
                 logger.info("=" * 50)
-                logger.info("⏰ ЧАСОВОЙ ОТЧЕТ ПЛАНИРОВЩИКА")
-                logger.info(f"В базе данных {len(user_data_store)} пользователей")
+                logger.info("⏰ ЧАСОВОЙ ОТЧЕТ")
+                logger.info(f"Пользователей в кэше: {len(user_data_store)}")
                 onboarded = sum(1 for u in user_data_store.values() if u.get('onboarding_complete', False))
-                logger.info(f"Из них прошли онбординг: {onboarded}")
+                logger.info(f"Прошли онбординг: {onboarded}")
                 logger.info("=" * 50)
 
             await asyncio.sleep(30)
 
         except Exception as e:
-            logger.error(f"❌ КРИТИЧЕСКАЯ ОШИБКА в планировщике: {e}", exc_info=True)
+            logger.error(f"❌ Ошибка в планировщике: {e}", exc_info=True)
             await asyncio.sleep(30)
 
 
