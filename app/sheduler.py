@@ -5,17 +5,16 @@ import time
 from datetime import datetime
 from typing import Optional
 
-# from app.ai import ai
-# from app.bot_app import bot_app
 from app.config import user_data_store, user_stats_store
-from app.menu import get_simple_keyboard
 from app.vk_module.vk_bot import vk_bot
 
 logger = logging.getLogger(__name__)
 
 
 # ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
-def vk_simple_keyboard(buttons_dict: dict, one_time=False):
+
+
+def vk_simple_keyboard(buttons_dict: dict):
     """Создаёт inline-клавиатуру для VK.
     buttons_dict: {label: cmd}"""
     keyboard_buttons = []
@@ -23,30 +22,7 @@ def vk_simple_keyboard(buttons_dict: dict, one_time=False):
         keyboard_buttons.append(
             [{"action": {"type": "callback", "payload": json.dumps({"cmd": cmd}), "label": label}, "color": "primary"}]
         )
-    return {"one_time": one_time, "buttons": keyboard_buttons, "inline": True}
-
-
-async def send_message_with_retry(
-    bot, chat_id: str, text: str, keyboard: dict, max_retries: int = 2, timeout: float = 10.0
-) -> bool:
-    """Отправляет сообщение через Telegram с повторными попытками"""
-    for attempt in range(max_retries):
-        try:
-            await asyncio.wait_for(
-                bot.send_message(chat_id=chat_id, text=text, reply_markup=get_simple_keyboard(keyboard)),
-                timeout=timeout,
-            )
-            return True
-        except asyncio.TimeoutError:
-            if attempt < max_retries - 1:
-                logger.warning(f"⏰ Таймаут (попытка {attempt + 1}), пробуем снова...")
-                await asyncio.sleep(1)
-            else:
-                logger.error(f"❌ Таймаут после {max_retries} попыток")
-        except Exception as e:
-            logger.error(f"❌ Ошибка отправки: {e}")
-            break
-    return False
+    return {"buttons": keyboard_buttons, "inline": True}
 
 
 async def vk_send_message_with_retry(user_id: str, text: str, keyboard: dict = None, max_retries: int = 2) -> bool:
@@ -65,25 +41,11 @@ async def vk_send_message_with_retry(user_id: str, text: str, keyboard: dict = N
     return False
 
 
-def is_vk_user(user_id: str) -> bool:
-    """Определяет платформу пользователя по ID.
-    Telegram ID обычно > 100000000, VK ID короче.
-    Также можно добавить поле platform в user_data_store."""
-    try:
-        uid = int(user_id)
-        # VK ID обычно меньше 1 миллиарда, Telegram ID больше
-        if uid < 1000000000:
-            return True
-        return False
-    except Exception:
-        return False
-
-
 # ========== УТРЕННЯЯ РАССЫЛКА ==========
 
 
 async def send_morning_message(target_user_id: Optional[str] = None):
-    """Отправляет утреннее сообщение (Telegram и VK)"""
+    """Отправляет утреннее сообщение"""
     start_time = time.time()
 
     if not user_data_store:
@@ -129,23 +91,15 @@ async def send_morning_message(target_user_id: Optional[str] = None):
             else:
                 text = base_text
 
-            if is_vk_user(user_id):
-                keyboard = vk_simple_keyboard(
-                    {
-                        "😊 Нормально": "morning_normal",
-                        "🥱 Разбит(а)": "morning_broken",
-                        "😐 Пока непонятно": "morning_unknown",
-                    }
-                )
-                success = await vk_send_message_with_retry(user_id, text, keyboard)
-            else:
-                keyboard = {
+            keyboard = vk_simple_keyboard(
+                {
                     "😊 Нормально": "morning_normal",
                     "🥱 Разбит(а)": "morning_broken",
                     "😐 Пока непонятно": "morning_unknown",
                 }
-                success = await send_message_with_retry(user_id, text, keyboard)
+            )
 
+            success = await vk_send_message_with_retry(user_id, text, keyboard)
             if success:
                 sent_count += 1
             else:
@@ -163,7 +117,7 @@ async def send_morning_message(target_user_id: Optional[str] = None):
 
 
 async def send_evening_message(target_user_id: Optional[str] = None):
-    """Отправляет вечернее сообщение (Telegram и VK)"""
+    """Отправляет вечернее сообщение"""
     start_time = time.time()
 
     if not user_data_store:
@@ -217,13 +171,8 @@ async def send_evening_message(target_user_id: Optional[str] = None):
                 text = base_text
                 buttons = {"Сделаю сегодня": "evening_do", "Не сейчас": "evening_not_now"}
 
-            if is_vk_user(user_id):
-                keyboard = vk_simple_keyboard(buttons)
-                success = await vk_send_message_with_retry(user_id, text, keyboard)
-            else:
-                keyboard = buttons
-                success = await send_message_with_retry(user_id, text, keyboard)
-
+            keyboard = vk_simple_keyboard(buttons)
+            success = await vk_send_message_with_retry(user_id, text, keyboard)
             if success:
                 sent_count += 1
             else:
@@ -238,8 +187,10 @@ async def send_evening_message(target_user_id: Optional[str] = None):
 
 
 # ========== ДНЕВНАЯ РАССЫЛКА ==========
+
+
 async def send_day_stress_message(target_user_id: Optional[str] = None):
-    """Отправляет дневное сообщение (Telegram и VK)"""
+    """Отправляет дневное сообщение"""
     if not user_data_store:
         return
 
@@ -277,15 +228,8 @@ async def send_day_stress_message(target_user_id: Optional[str] = None):
                     "💪 потяни плечи"
                 )
 
-            buttons = {"✅ Сделал(а)": "day_stress_done", "Не до этого": "day_stress_skip"}
-
-            if is_vk_user(user_id):
-                keyboard = vk_simple_keyboard(buttons)
-                success = await vk_send_message_with_retry(user_id, text, keyboard)
-            else:
-                keyboard = buttons
-                success = await send_message_with_retry(user_id, text, keyboard)
-
+            keyboard = vk_simple_keyboard({"✅ Сделал(а)": "day_stress_done", "Не до этого": "day_stress_skip"})
+            success = await vk_send_message_with_retry(user_id, text, keyboard)
             if success:
                 sent_count += 1
             else:
@@ -298,6 +242,8 @@ async def send_day_stress_message(target_user_id: Optional[str] = None):
 
 
 # ========== ПЛАНИРОВЩИК ==========
+
+
 async def run_scheduler():
     """Планировщик для VK"""
     logger.info("=" * 60)
@@ -323,35 +269,35 @@ async def run_scheduler():
                 if morning_time is None:
                     morning_time = '09:00'
 
-                # Утренняя рассылка (только VK)
+                # Утренняя рассылка
                 try:
                     morning_hour, morning_min = map(int, morning_time.split(':'))
                     if current_time.hour == morning_hour and current_time.minute == morning_min:
                         if should_send_message(user_id, 'morning'):
-                            logger.info(f"🎯 [УТРО VK] Рассылка {user_id} в {morning_time}")
-                            await send_morning_message(user_id)
+                            logger.info(f"🎯 [УТРО] Рассылка {user_id} в {morning_time}")
+                            await send_morning_message(target_user_id=user_id)
                             await asyncio.sleep(60)
                 except (ValueError, TypeError):
                     pass
 
-                # Вечерняя рассылка (только VK)
+                # Вечерняя рассылка
                 if evening_time is not None:
                     try:
                         evening_hour, evening_min = map(int, evening_time.split(':'))
                         if current_time.hour == evening_hour and current_time.minute == evening_min:
                             if should_send_message(user_id, 'evening'):
-                                logger.info(f"🎯 [ВЕЧЕР VK] Рассылка {user_id} в {evening_time}")
-                                await send_evening_message(user_id)
+                                logger.info(f"🎯 [ВЕЧЕР] Рассылка {user_id} в {evening_time}")
+                                await send_evening_message(target_user_id=user_id)
                                 await asyncio.sleep(60)
                     except (ValueError, TypeError):
                         pass
 
-                # Дневная рассылка (только VK)
+                # Дневная рассылка (фиксированное время 15:00)
                 if current_time.hour == 15 and current_time.minute == 0:
                     if should_send_message(user_id, 'day'):
                         if 'днём высокий стресс' in data.get('scenario', []):
-                            logger.info(f"🎯 [ДЕНЬ VK] Рассылка {user_id}")
-                            await send_day_stress_message(user_id)
+                            logger.info(f"🎯 [ДЕНЬ] Рассылка {user_id}")
+                            await send_day_stress_message(target_user_id=user_id)
                             await asyncio.sleep(60)
 
             if check_counter % 120 == 0:
@@ -379,22 +325,22 @@ def should_send_message(user_id: str, message_type: str) -> bool:
 
     if frequency.startswith("1 сообщение"):
         daily_time = user_data.get('daily_time', '')
-        if daily_time.startswith("Утром") and message_type == 'morning':
-            return True
-        elif daily_time.startswith("Днём") and message_type == 'day':
-            return True
-        elif daily_time.startswith("Вечером") and message_type == 'evening':
-            return True
+        if daily_time.startswith("Утром"):
+            return message_type == 'morning'
+        elif daily_time.startswith("Днём"):
+            return message_type == 'day'
+        elif daily_time.startswith("Вечером"):
+            return message_type == 'evening'
         return message_type == 'morning'
 
     if frequency.startswith("Раз в пару дней"):
         biweekly_time = user_data.get('biweekly_time', '')
-        if biweekly_time.startswith("Утром") and message_type == 'morning':
-            return True
-        elif biweekly_time.startswith("Днём") and message_type == 'day':
-            return True
-        elif biweekly_time.startswith("Вечером") and message_type == 'evening':
-            return True
+        if biweekly_time.startswith("Утром"):
+            return message_type == 'morning'
+        elif biweekly_time.startswith("Днём"):
+            return message_type == 'day'
+        elif biweekly_time.startswith("Вечером"):
+            return message_type == 'evening'
         return message_type == 'morning'
 
     return True
