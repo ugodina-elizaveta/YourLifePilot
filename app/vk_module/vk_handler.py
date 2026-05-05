@@ -134,13 +134,16 @@ class VkHandler:
     # ---------- Онбординг ----------
     async def start(self, user_id):
         self.init_user(user_id)
+        # Принудительно сбрасываем ключевые поля для нового онбординга,
+        # даже если пользователь уже был в кэше
+        user_data_store[user_id]['scenario'] = []
+        user_data_store[user_id]['answers'] = {}
+        user_data_store[user_id]['onboarding_complete'] = False
         user_data_store[user_id]['vk_state'] = 'AGREEMENT'
+        
         await self.send_message(user_id, WELCOME_TEXT)
-        await self.send_message(
-            user_id,
-            DISCLAIMER_TEXT,
-            keyboard=self.simple_keyboard({"✅ Понимаю и согласен(на)": "agree"}, one_time=True),
-        )
+        await self.send_message(user_id, DISCLAIMER_TEXT,
+                                keyboard=self.simple_keyboard({"✅ Понимаю и согласен(на)": "agree"}, one_time=True))
 
     # ---------- Текстовые обработчики онбординга ----------
     async def physical_details_text(self, user_id, text):
