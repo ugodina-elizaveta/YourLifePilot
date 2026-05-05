@@ -140,10 +140,13 @@ class VkHandler:
         user_data_store[user_id]['answers'] = {}
         user_data_store[user_id]['onboarding_complete'] = False
         user_data_store[user_id]['vk_state'] = 'AGREEMENT'
-        
+
         await self.send_message(user_id, WELCOME_TEXT)
-        await self.send_message(user_id, DISCLAIMER_TEXT,
-                                keyboard=self.simple_keyboard({"✅ Понимаю и согласен(на)": "agree"}, one_time=True))
+        await self.send_message(
+            user_id,
+            DISCLAIMER_TEXT,
+            keyboard=self.simple_keyboard({"✅ Понимаю и согласен(на)": "agree"}, one_time=True),
+        )
 
     # ---------- Текстовые обработчики онбординга ----------
     async def physical_details_text(self, user_id, text):
@@ -490,6 +493,7 @@ class VkHandler:
             user_stats_store[user_id]['morning_skip_streak'] = 0
             user_stats_store[user_id]['last_action_date']['morning'] = today
             await db.save_action(user_id, "micro", "done")
+            await db.save_user_stats(user_id, user_stats_store[user_id])
             await self.send_message(user_id, "Отлично! Маленький шаг сделан. Так держать!")
         elif cmd == 'morning_micro_later':
             user_stats_store[user_id]['morning_skip_streak'] = (
@@ -498,8 +502,8 @@ class VkHandler:
             user_stats_store[user_id]['morning_streak'] = 0
             user_stats_store[user_id]['last_action_date']['morning'] = today
             await db.save_action(user_id, "micro", "skipped")
+            await db.save_user_stats(user_id, user_stats_store[user_id])
             await self.send_message(user_id, "Хорошо, можешь вернуться к этому позже. Я напомню завтра.")
-        await db.save_user_stats(user_id, user_stats_store[user_id])
 
     async def evening_action_handler(self, user_id, cmd):
         today = datetime.now().date()
