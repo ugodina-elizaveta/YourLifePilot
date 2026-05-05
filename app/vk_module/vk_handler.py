@@ -157,6 +157,11 @@ class VkHandler:
 
     # ---------- Обработка всех колбэков ----------
     async def handle_callback(self, user_id: str, cmd: str):
+        logger.info(f"VK callback from {user_id}: {cmd}")
+
+        # Нормализация answers (убедимся, что это словарь)
+        if not isinstance(user_data_store[user_id].get('answers'), dict):
+            user_data_store[user_id]['answers'] = {}
         """Обработка всех callback-команд (от инлайн-кнопок)"""
         logger.info(f"VK callback from {user_id}: {cmd}")
 
@@ -245,9 +250,12 @@ class VkHandler:
         elif cmd.startswith('physical_'):
             idx = int(cmd.split('_')[1])
             answer = PHYSICAL_LIMITS_OPTIONS[idx]
-            if answer == "Другое (укажу в следующем шаге)":
+            if answer == "Другое (укажу отдельно)":
                 user_data_store[user_id]['vk_state'] = 'PHYSICAL_DETAILS'
                 await self.send_message(user_id, "Пожалуйста, опиши свои ограничения в одном сообщении.")
+                await self.send_message(
+                    user_id, "Например: «У меня астма, нельзя интенсивных нагрузок» или «Беременность, 2 триместр»."
+                )
             else:
                 user_data_store[user_id]['physical_limits'] = answer
                 await self.send_message(user_id, "Спасибо! Я учту это.")
