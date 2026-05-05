@@ -52,6 +52,10 @@ class VkApi:
         if attachment:
             params['attachment'] = attachment
         result = await self._call('messages.send', params)
+        if result is not None:
+            logger.info(f"✅ Сообщение отправлено пользователю {user_id}")
+        else:
+            logger.error(f"❌ Не удалось отправить сообщение пользователю {user_id}")
         # Обычно возвращает словарь с peer_id, message_id, но может быть int (ID)
         if isinstance(result, dict):
             return result.get('message_id')
