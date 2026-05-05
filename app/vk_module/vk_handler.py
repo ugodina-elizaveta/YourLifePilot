@@ -160,6 +160,35 @@ class VkHandler:
         """Обработка всех callback-команд (от инлайн-кнопок)"""
         logger.info(f"VK callback from {user_id}: {cmd}")
 
+        # Проверяем, что callback соответствует текущему состоянию
+        state = user_data_store.get(user_id, {}).get('vk_state')
+        expected_prefix = {
+            'AGREEMENT': 'agree',
+            'AGE': 'age_',
+            'OCCUPATION': 'occupation_',
+            'MORNING_TIME': 'morning_time_',
+            'EVENING_TIME': 'evening_time_',
+            'PHYSICAL_LIMITS': 'physical_',
+            'PHYSICAL_DETAILS': None,  # текстовый ввод
+            'NOTIFICATION_FREQ': 'freq_',
+            'DAILY_TIME': 'daily_time_',
+            'BIWEEKLY_TIME': 'biweekly_time_',
+            'Q1': 'q1_',
+            'Q2': 'q2_',
+            'Q3': 'q3_',
+            'Q4': 'q4_',
+            'Q5': 'q5_',
+        }.get(state)
+
+        # Команды планировщика (morning_, evening_, feeling_, day_stress_) разрешены всегда
+        if cmd.startswith(('morning_', 'evening_', 'feeling_', 'day_stress_')):
+            pass  # продолжаем обработку
+        elif cmd == 'agree' and state != 'AGREEMENT':
+            return
+        elif expected_prefix and not cmd.startswith(expected_prefix):
+            logger.warning(f"Ignored callback {cmd} (expected prefix {expected_prefix}, state {state})")
+            return
+
         # === ОНБОРДИНГ ===
         if cmd == 'agree':
             user_data_store[user_id]['vk_state'] = 'AGE'
