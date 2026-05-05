@@ -7,7 +7,7 @@ from app.vk_module.vk_bot import vk_bot
 from fastapi import Request
 from telegram import Update
 
-from app.app import app, bot_app
+from app.app import app
 from app.config import FULL_WEBHOOK_URL, WEBHOOK_PATH, user_data_store
 from app.sheduler import send_day_stress_message, send_evening_message, send_morning_message
 
@@ -31,7 +31,7 @@ async def webhook(request: Request):
         logger.info(f"📨 Получено обновление: {update_data.get('update_id')}")
 
         # Создаем объект Update
-        update = Update.de_json(update_data, bot_app.bot)
+        update = Update.de_json(update_data, vk_bot)
 
         # Логируем тип обновления
         if update.message:
@@ -40,7 +40,7 @@ async def webhook(request: Request):
             logger.info(f"🖱️ Callback от {update.callback_query.from_user.id}: {update.callback_query.data}")
 
         # Обрабатываем обновление
-        await bot_app.process_update(update)
+        await vk_bot.process_update(update)
 
         return {"ok": True}
 
@@ -81,7 +81,7 @@ async def health():
     """Проверка здоровья"""
     return {
         "status": "healthy",
-        "bot_initialized": bot_app._initialized if hasattr(bot_app, '_initialized') else False,
+        "bot_initialized": vk_bot._initialized if hasattr(vk_bot, '_initialized') else False,
         "last_activity": last_activity.isoformat(),
         "users_count": len(user_data_store),
     }
@@ -97,17 +97,11 @@ async def trigger_morning_webhook(user_id: str = None):
     """
     try:
 
-        class DummyContext:
-            def __init__(self, bot):
-                self.bot = bot
-
-        dummy_context = DummyContext(bot_app.bot)
-
         if user_id:
-            await send_morning_message(dummy_context, target_user_id=user_id)
+            await send_morning_message(target_user_id=user_id)
             return {"ok": True, "message": f"Тестовая утренняя рассылка для пользователя {user_id} выполнена"}
         else:
-            await send_morning_message(dummy_context)
+            await send_morning_message()
             return {"ok": True, "message": "Массовая утренняя рассылка выполнена"}
 
     except Exception as e:
@@ -120,17 +114,11 @@ async def trigger_evening_webhook(user_id: str = None):
     """Тестовый запуск вечерней рассылки для конкретного пользователя"""
     try:
 
-        class DummyContext:
-            def __init__(self, bot):
-                self.bot = bot
-
-        dummy_context = DummyContext(bot_app.bot)
-
         if user_id:
-            await send_evening_message(dummy_context, target_user_id=user_id)
+            await send_evening_message(target_user_id=user_id)
             return {"ok": True, "message": f"Тестовая вечерняя рассылка для пользователя {user_id} выполнена"}
         else:
-            await send_evening_message(dummy_context)
+            await send_evening_message()
             return {"ok": True, "message": "Массовая вечерняя рассылка выполнена"}
 
     except Exception as e:
