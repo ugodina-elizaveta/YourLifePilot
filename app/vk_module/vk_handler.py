@@ -191,7 +191,7 @@ class VkHandler:
             )
 
         elif cmd.startswith('morning_time_'):
-            idx = int(cmd.split('_')[1])
+            idx = int(cmd.split('_')[2])
             answer = MORNING_TIME_OPTIONS[idx]
             user_data_store[user_id]['morning_time'] = "09:00" if answer == "Не важно (09:00)" else answer
             user_data_store[user_id]['vk_state'] = 'EVENING_TIME'
@@ -202,7 +202,7 @@ class VkHandler:
             )
 
         elif cmd.startswith('evening_time_'):
-            idx = int(cmd.split('_')[1])
+            idx = int(cmd.split('_')[2])
             answer = EVENING_TIME_OPTIONS[idx]
             user_data_store[user_id]['evening_time'] = "21:00" if answer == "Не важно (21:00)" else answer
             await db.save_user(user_id, user_data_store[user_id])
@@ -263,7 +263,7 @@ class VkHandler:
                 )
 
         elif cmd.startswith('daily_time_'):
-            idx = int(cmd.split('_')[1])
+            idx = int(cmd.split('_')[2])
             answer = DAILY_TIME_OPTIONS[idx]
             user_data_store[user_id]['daily_time'] = answer
             time_map = {"Утром (08:00-10:00)": "09:00", "Днём (13:00-15:00)": "14:00", "Вечером (19:00-21:00)": "20:00"}
@@ -277,7 +277,7 @@ class VkHandler:
             )
 
         elif cmd.startswith('biweekly_time_'):
-            idx = int(cmd.split('_')[1])
+            idx = int(cmd.split('_')[2])
             answer = BIWEEKLY_TIME_OPTIONS[idx]
             user_data_store[user_id]['biweekly_time'] = answer
             time_map = {"Утром (08:00-10:00)": "09:00", "Днём (13:00-15:00)": "14:00", "Вечером (19:00-21:00)": "20:00"}

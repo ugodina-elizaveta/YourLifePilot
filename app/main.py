@@ -113,15 +113,11 @@ async def vk_webhook(request: Request):
         message_id = str(message.get("conversation_message_id", message.get("id")))
         from_id = str(message.get("from_id"))
 
-        msg_key = f"{from_id}_{message_id}"
+        msg_key = f"msg_{from_id}_{message_id}"
         if msg_key in processed_messages:
-            logger.debug(f"Duplicate message ignored: {msg_key}")
             return PlainTextResponse("ok")
 
         processed_messages[msg_key] = datetime.now()
-        cutoff = datetime.now() - timedelta(minutes=5)
-        processed_messages = {k: v for k, v in processed_messages.items() if v > cutoff}
-
         logger.info(f"New message from VK user {from_id}: {message.get('text', '')[:50]}")
         await vk_bot.process_message(message)
         return PlainTextResponse("ok")
@@ -131,9 +127,15 @@ async def vk_webhook(request: Request):
         last_activity = datetime.now()
         event_data = data["object"]
         user_id = str(event_data.get("user_id"))
+        event_id = str(event_data.get("event_id", ""))
         payload = event_data.get("payload", {})
 
-        # payload уже словарь, не нужно json.loads
+        cb_key = f"cb_{user_id}_{event_id}"
+        if cb_key in processed_messages:
+            return PlainTextResponse("ok")
+
+        processed_messages[cb_key] = datetime.now()
+
         if isinstance(payload, str):
             import json
 
@@ -144,7 +146,11 @@ async def vk_webhook(request: Request):
         await vk_bot.handler.handle(user_id, "", cmd)
         return PlainTextResponse("ok")
 
-    # Все остальные события
+    # Очистка старых записей при накоплении
+    if len(processed_messages) > 500:
+        cutoff = datetime.now() - timedelta(minutes=5)
+        processed_messages = {k: v for k, v in processed_messages.items() if v > cutoff}
+
     return PlainTextResponse("ok")
 
 
