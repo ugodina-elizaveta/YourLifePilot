@@ -17,7 +17,6 @@ class VkBot:
         text = msg.get('text', '').strip()
         payload = msg.get('payload', '')
 
-        # Если есть payload (от callback-кнопки), извлекаем команду
         cmd = None
         if payload:
             try:

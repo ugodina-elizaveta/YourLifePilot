@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class LocalAI:
-    """Локальная модель LoRA r=2 (оптимизировано для 16GB RAM)"""
+    """Локальная модель LoRA r=2"""
 
     def __init__(self):
         self.model = None
@@ -22,7 +22,7 @@ class LocalAI:
         self.model_path = "/YourLifePilot/models/lora_r2"
 
     def load_model(self):
-        """Загружает модель с оптимизацией под 16GB RAM"""
+        """Загружает модель"""
         if self.is_loaded:
             logger.info("Модель уже загружена")
             return
@@ -34,7 +34,6 @@ class LocalAI:
             available_ram_gb = psutil.virtual_memory().available / (1024**3)
             logger.info(f"📊 Доступно RAM: {available_ram_gb:.1f} GB")
 
-            # Ограничиваем потоки CPU (у вас 4 ядра, оставляем 2 для модели)
             torch.set_num_threads(2)
             os.environ["OMP_NUM_THREADS"] = "2"
             os.environ["MKL_NUM_THREADS"] = "2"
@@ -50,7 +49,6 @@ class LocalAI:
                 self.tokenizer.pad_token = self.tokenizer.eos_token
 
             logger.info("📥 Загрузка базовой модели...")
-            # Оптимизированные настройки для 16GB RAM
             base_model = AutoModelForCausalLM.from_pretrained(
                 "microsoft/Phi-3.5-mini-instruct",
                 device_map="cpu",
@@ -58,10 +56,9 @@ class LocalAI:
                 trust_remote_code=True,
                 use_cache=False,
                 low_cpu_mem_usage=True,
-                attn_implementation="eager",  # Без flash attention
+                attn_implementation="eager",
             )
 
-            # Логируем память после загрузки базы
             memory_mb = psutil.Process().memory_info().rss / 1024 / 1024
             logger.info(f"📊 RAM после базы: {memory_mb:.0f} MB")
 
@@ -69,14 +66,12 @@ class LocalAI:
             self.model = PeftModel.from_pretrained(base_model, self.model_path)
             self.model.eval()
 
-            # Замораживаем все параметры
             for param in self.model.parameters():
                 param.requires_grad = False
 
             self.is_loaded = True
             logger.info("✅ Локальная модель LoRA r=2 успешно загружена")
 
-            # Финальный лог памяти
             memory_mb = psutil.Process().memory_info().rss / 1024 / 1024
             memory_percent = psutil.virtual_memory().percent
             logger.info(f"📊 Итоговое использование RAM: {memory_mb:.0f} MB ({memory_percent:.1f}%)")
@@ -89,7 +84,6 @@ class LocalAI:
         return self.is_loaded
 
     def generate_advice(self, user_context: str, situation: str, user_data: dict = None) -> str:
-        # ... проверки на запрещённые темы ...
 
         if not self.is_loaded:
             self.load_model()
@@ -99,7 +93,6 @@ class LocalAI:
         try:
             logger.info(f"🎯 Начало генерации для: {user_context[:50]}...")
 
-            # Правильный формат для Phi-3.5 через apply_chat_template
             messages = [
                 {
                     "role": "system",
@@ -108,7 +101,6 @@ class LocalAI:
                 {"role": "user", "content": user_context},
             ]
 
-            # Используем встроенный chat_template модели
             prompt = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 
             logger.info(f"📝 Токенизация...")

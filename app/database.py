@@ -147,11 +147,8 @@ class Database:
                 row = await conn.fetchrow("SELECT * FROM users WHERE user_id = $1", user_id)
                 if row:
                     data = dict(row)
-                    # ✅ ИСПРАВЛЕНИЕ: явно преобразуем JSONB поля
                     for field in ['scenario', 'answers']:
                         if field in data and data[field] is not None:
-                            # asyncpg автоматически декодирует JSONB в Python объекты
-                            # но для подстраховки оставим
                             pass
                     return data
                 return None
