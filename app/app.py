@@ -39,17 +39,15 @@ async def lifespan(app: FastAPI):
         await load_users_to_cache()
         logger.info("✅ Кэш пользователей загружен")
 
-        # # Загружаем локальную AI-модель (LoRA r=2) при старте
-        # try:
-        #     from app.local_ai import local_ai
-        #     logger.info("🤖 Предварительная загрузка локальной модели LoRA r=2...")
-        #     local_ai.load_model()
-        #     if local_ai.is_loaded:
-        #         logger.info("✅ Локальная модель успешно загружена")
-        #     else:
-        #         logger.warning("⚠️ Локальная модель не загрузилась, будет использоваться YandexGPT")
-        # except Exception as e:
-        #     logger.error(f"❌ Ошибка при загрузке локальной модели: {e}")
+        # Загружаем локальную AI-модель (LoRA r=2) при старте
+        try:
+            from app.local_ai import local_ai
+            logger.info("🤖 Предварительная загрузка локальной модели LoRA r=2...")
+            local_ai.load_model()
+            if local_ai.is_loaded:
+                logger.info("✅ Локальная модель успешно загружена")
+        except Exception as e:
+            logger.error(f"❌ Ошибка при загрузке локальной модели: {e}")
 
         # 3. Планировщик
         scheduler_task = asyncio.create_task(run_scheduler())

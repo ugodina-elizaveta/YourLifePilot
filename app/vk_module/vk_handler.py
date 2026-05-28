@@ -34,7 +34,8 @@ from app.config import (
     BIWEEKLY_TIME_QUESTION,
     BIWEEKLY_TIME_OPTIONS,
 )
-from app.ai import ai
+from app.local_ai import local_ai as ai
+# from app.ai import ai
 from app.database import db
 
 logger = logging.getLogger(__name__)
