@@ -1,6 +1,6 @@
 import logging
 import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
+from transformers import AutoTokenizer, AutoModelForCausalLM
 from peft import PeftModel
 import gc
 import os
@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 class LocalAI:
-    """Локальная модель LoRA r=2 (оптимизировано для CPU)"""
+    """Локальная модель LoRA r=2 (CPU, float16)"""
 
     def __init__(self):
         self.model = None
@@ -24,34 +24,26 @@ class LocalAI:
         try:
             logger.info("🚀 Загрузка локальной модели LoRA r=2...")
 
-            # Ограничиваем потоки
             torch.set_num_threads(4)
             os.environ["OMP_NUM_THREADS"] = "4"
-            os.environ["MKL_NUM_THREADS"] = "4"
 
             gc.collect()
 
-            logger.info("📥 Загрузка токенизатора...")
+            logger.info("📥 Токенизатор...")
             self.tokenizer = AutoTokenizer.from_pretrained("microsoft/Phi-3.5-mini-instruct", trust_remote_code=True)
             if self.tokenizer.pad_token is None:
                 self.tokenizer.pad_token = self.tokenizer.eos_token
 
-            logger.info("📥 Загрузка базовой модели (4-bit)...")
-            bnb_config = BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_compute_dtype=torch.float16,
-                bnb_4bit_quant_type="nf4",
-            )
-
+            logger.info("📥 Базовая модель (CPU, float16)...")
             base_model = AutoModelForCausalLM.from_pretrained(
                 "microsoft/Phi-3.5-mini-instruct",
-                quantization_config=bnb_config,
                 device_map="cpu",
+                torch_dtype=torch.float16,
                 trust_remote_code=True,
                 low_cpu_mem_usage=True,
             )
 
-            logger.info("📥 Загрузка LoRA адаптера...")
+            logger.info("📥 LoRA адаптер...")
             self.model = PeftModel.from_pretrained(base_model, self.model_path)
             self.model.eval()
 
@@ -59,7 +51,7 @@ class LocalAI:
                 param.requires_grad = False
 
             self.is_loaded = True
-            logger.info("✅ Локальная модель LoRA r=2 успешно загружена")
+            logger.info("✅ Модель готова")
 
         except Exception as e:
             logger.error(f"❌ Ошибка загрузки: {e}")
@@ -73,9 +65,9 @@ class LocalAI:
             return "Извини, модель ещё загружается. Попробуй через минуту."
 
         try:
-            # Более короткий промпт для ускорения
             prompt = (
-                "<|system|>\nТы — эмпатичный помощник. Отвечай кратко, поддерживающе, на русском.<|end|>\n"
+                "<|system|>\nТы — эмпатичный помощник. Отвечай кратко, "
+                "поддерживающе, на русском. 2-3 предложения.<|end|>\n"
                 f"<|user|>\n{user_context}<|end|>\n<|assistant|>\n"
             )
 
@@ -85,19 +77,23 @@ class LocalAI:
             with torch.no_grad():
                 outputs = self.model.generate(
                     **inputs,
-                    max_new_tokens=80,  # больше токенов для осмысленного ответа
+                    max_new_tokens=80,
                     temperature=0.7,
                     do_sample=True,
                     top_p=0.9,
                     pad_token_id=self.tokenizer.eos_token_id,
                     eos_token_id=self.tokenizer.eos_token_id,
-                    repetition_penalty=1.2,  # чтобы не зацикливалась
                 )
 
             response = self.tokenizer.decode(outputs[0][input_len:], skip_special_tokens=True).strip()
 
-            logger.info(f"✅ Сгенерирован ответ: {response[:100]}...")
-            return response if response else "Понимаю тебя. Расскажи подробнее, что тебя беспокоит."
+            # Очистка мусора
+            response = response.split('\n<|')[0].strip()
+            if not response:
+                response = "Понимаю тебя. Расскажи подробнее, что тебя беспокоит."
+
+            logger.info(f"✅ Ответ: {response[:100]}...")
+            return response
 
         except Exception as e:
             logger.error(f"❌ Ошибка генерации: {e}")
