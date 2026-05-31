@@ -64,10 +64,35 @@ class LocalAI:
         if not self.is_loaded:
             return "Извини, модель ещё загружается. Попробуй через минуту."
 
+        # Проверка запрещённых тем
+        from app.config import FORBIDDEN_TOPICS
+
+        if any(word in user_context.lower() for word in FORBIDDEN_TOPICS):
+            return (
+                "Мне очень жаль, что ты проходишь через это. "
+                "Пожалуйста, обратись за профессиональной помощью:\n"
+                "📞 Круглосуточный телефон доверия: 8-800-2000-122\n"
+                "Я здесь, чтобы поддержать, но в этой ситуации "
+                "важно поговорить со специалистом."
+            )
+
         try:
+            # Ситуационные подсказки
+            situation_hints = {
+                'stress': "Дай короткий практический совет как справиться со стрессом.",
+                'sleep': "Посоветуй что-то простое для улучшения сна.",
+                'sad': "Поддержи тёплыми словами, подними настроение.",
+                'morning': "Посоветуй как начать день бодро.",
+                'evening': "Посоветуй как расслабиться перед сном.",
+                'general': "Дай короткий полезный совет.",
+            }
+            hint = situation_hints.get(situation, situation_hints['general'])
+
             prompt = (
-                "<|system|>\nТы — эмпатичный помощник. Отвечай кратко, "
-                "поддерживающе, на русском. 2-3 предложения.<|end|>\n"
+                "<|system|>\nТы — эмпатичный психологический помощник. "
+                "Отвечай строго на русском языке. "
+                "Будь кратким: 2-3 предложения, не больше 500 символов. "
+                f"{hint}<|end|>\n"
                 f"<|user|>\n{user_context}<|end|>\n<|assistant|>\n"
             )
 
@@ -77,22 +102,27 @@ class LocalAI:
             with torch.no_grad():
                 outputs = self.model.generate(
                     **inputs,
-                    max_new_tokens=80,
+                    max_new_tokens=60,
                     temperature=0.7,
                     do_sample=True,
                     top_p=0.9,
                     pad_token_id=self.tokenizer.eos_token_id,
                     eos_token_id=self.tokenizer.eos_token_id,
+                    stop_strings=["<|end|>", "<|user|>", "<|system|>"],
+                    tokenizer=self.tokenizer,
                 )
 
             response = self.tokenizer.decode(outputs[0][input_len:], skip_special_tokens=True).strip()
 
             # Очистка мусора
-            response = response.split('\n<|')[0].strip()
-            if not response:
+            for bad in ['<|end|>', '<|user|>', '<|system|>', '<|assistant|>']:
+                response = response.split(bad)[0]
+            response = response.strip()
+
+            if not response or len(response) < 5:
                 response = "Понимаю тебя. Расскажи подробнее, что тебя беспокоит."
 
-            logger.info(f"✅ Ответ: {response[:100]}...")
+            logger.info(f"✅ Ответ ({len(response)} символов): {response[:100]}...")
             return response
 
         except Exception as e:
