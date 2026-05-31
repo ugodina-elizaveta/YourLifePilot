@@ -79,19 +79,20 @@ class LocalAI:
         try:
             # Ситуационные подсказки
             situation_hints = {
-                'stress': "Дай короткий практический совет как справиться со стрессом.",
+                'stress': "Дай практический совет как справиться со стрессом.",
                 'sleep': "Посоветуй что-то простое для улучшения сна.",
                 'sad': "Поддержи тёплыми словами, подними настроение.",
                 'morning': "Посоветуй как начать день бодро.",
                 'evening': "Посоветуй как расслабиться перед сном.",
-                'general': "Дай короткий полезный совет.",
+                'general': "Дай полезный совет.",
             }
             hint = situation_hints.get(situation, situation_hints['general'])
 
             prompt = (
                 "<|system|>\nТы — эмпатичный психологический помощник. "
-                "Отвечай строго на русском языке. "
-                "Будь кратким: 2-3 предложения, не больше 500 символов. "
+                "Отвечай на русском языке. "
+                "Будь поддерживающим и доброжелательным. "
+                "Пиши 3-5 предложений, заканчивай мысль полностью. "
                 f"{hint}<|end|>\n"
                 f"<|user|>\n{user_context}<|end|>\n<|assistant|>\n"
             )
@@ -102,24 +103,30 @@ class LocalAI:
             with torch.no_grad():
                 outputs = self.model.generate(
                     **inputs,
-                    max_new_tokens=60,
+                    max_new_tokens=120,
                     temperature=0.7,
                     do_sample=True,
                     top_p=0.9,
                     pad_token_id=self.tokenizer.eos_token_id,
                     eos_token_id=self.tokenizer.eos_token_id,
-                    stop_strings=["<|end|>", "<|user|>", "<|system|>"],
-                    tokenizer=self.tokenizer,
                 )
 
             response = self.tokenizer.decode(outputs[0][input_len:], skip_special_tokens=True).strip()
 
-            # Очистка мусора
+            # Мягкая очистка: обрезаем только явный мусор
             for bad in ['<|end|>', '<|user|>', '<|system|>', '<|assistant|>']:
-                response = response.split(bad)[0]
-            response = response.strip()
+                if bad in response:
+                    response = response.split(bad)[0].strip()
 
-            if not response or len(response) < 5:
+            # Убираем незаконченные предложения в конце
+            if response and response[-1] not in '.!?':
+                # Находим последний знак препинания
+                for i in range(len(response) - 1, 0, -1):
+                    if response[i] in '.!?':
+                        response = response[: i + 1]
+                        break
+
+            if not response or len(response) < 10:
                 response = "Понимаю тебя. Расскажи подробнее, что тебя беспокоит."
 
             logger.info(f"✅ Ответ ({len(response)} символов): {response[:100]}...")
