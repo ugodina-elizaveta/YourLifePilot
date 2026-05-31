@@ -426,20 +426,18 @@ class VkHandler:
         await self.send_message(user_id, "Режим AI завершён.")
 
     async def ai_chat(self, user_id, text):
-        # Игнорируем ответы на сообщения старше 2 минут
-        last_msg_time = user_data_store[user_id].get('_last_ai_msg_time', 0)
+        # Проверка по первым 30 символам
+        last_text = user_data_store[user_id].get('_last_ai_text', '')
+        last_time = user_data_store[user_id].get('_last_ai_time', 0)
         now = datetime.now().timestamp()
 
-        if (now - last_msg_time) > 120:
-            # Очищаем старые незавершённые ответы
-            user_data_store[user_id]['_ai_busy'] = False
-
-        if user_data_store[user_id].get('_ai_busy', False):
-            logger.info(f"⏭️ Модель занята, пропускаю от {user_id}")
+        # Сравниваем начало сообщений (VK обрезает длинные)
+        if text[:30] == last_text[:30] and (now - last_time) < 120:
+            logger.info(f"⏭️ Дубликат от {user_id}: {text[:40]}...")
             return
 
-        user_data_store[user_id]['_ai_busy'] = True
-        user_data_store[user_id]['_last_ai_msg_time'] = now
+        user_data_store[user_id]['_last_ai_text'] = text[:30]
+        user_data_store[user_id]['_last_ai_time'] = now
 
         try:
             session_id = user_data_store[user_id].get('ai_chat_session_id', str(uuid.uuid4()))
