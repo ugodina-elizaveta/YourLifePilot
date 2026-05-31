@@ -426,33 +426,35 @@ class VkHandler:
         await self.send_message(user_id, "Режим AI завершён.")
 
     async def ai_chat(self, user_id, text):
-        # Проверка по первым 30 символам
+        # Защита от дубликатов по первым 40 символам
         last_text = user_data_store[user_id].get('_last_ai_text', '')
         last_time = user_data_store[user_id].get('_last_ai_time', 0)
         now = datetime.now().timestamp()
 
-        # Сравниваем начало сообщений (VK обрезает длинные)
-        if text[:30] == last_text[:30] and (now - last_time) < 120:
+        if len(text) >= 30:
+            check_text = text[:40]
+        else:
+            check_text = text
+
+        if check_text == last_text and (now - last_time) < 300:
             logger.info(f"⏭️ Дубликат от {user_id}: {text[:40]}...")
             return
 
-        user_data_store[user_id]['_last_ai_text'] = text[:30]
+        user_data_store[user_id]['_last_ai_text'] = check_text
         user_data_store[user_id]['_last_ai_time'] = now
 
-        try:
-            session_id = user_data_store[user_id].get('ai_chat_session_id', str(uuid.uuid4()))
-            await db.save_ai_chat_message(user_id, session_id, text, "user")
+        # Генерация ответа
+        session_id = user_data_store[user_id].get('ai_chat_session_id', str(uuid.uuid4()))
+        await db.save_ai_chat_message(user_id, session_id, text, "user")
 
-            from app.handler import detect_situation_from_text
+        from app.handler import detect_situation_from_text
 
-            situation = detect_situation_from_text(text)
-            user_data = user_data_store.get(user_id, {})
-            advice = ai.generate_advice(user_context=text, situation=situation, user_data=user_data)
+        situation = detect_situation_from_text(text)
+        user_data = user_data_store.get(user_id, {})
+        advice = ai.generate_advice(user_context=text, situation=situation, user_data=user_data)
 
-            await self.send_message(user_id, advice)
-            await db.save_ai_chat_message(user_id, session_id, advice, "assistant", metadata={"situation": situation})
-        finally:
-            user_data_store[user_id]['_ai_busy'] = False
+        await self.send_message(user_id, advice)
+        await db.save_ai_chat_message(user_id, session_id, advice, "assistant", metadata={"situation": situation})
 
     async def morning_action_handler(self, user_id, cmd):
         if cmd == 'morning_normal':
