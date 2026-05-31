@@ -5,6 +5,7 @@ import time
 from datetime import datetime
 from typing import Optional
 
+from app.database import db
 from app.config import user_data_store, user_stats_store
 from app.vk_module.vk_bot import vk_bot
 
@@ -102,6 +103,8 @@ async def send_morning_message(target_user_id: Optional[str] = None):
             success = await vk_send_message_with_retry(user_id, text, keyboard)
             if success:
                 sent_count += 1
+                user_data_store[user_id]['last_sent_date'] = datetime.now().date()
+                await db.save_user(user_id, user_data_store[user_id])
             else:
                 error_count += 1
             await asyncio.sleep(0.3)
@@ -175,6 +178,8 @@ async def send_evening_message(target_user_id: Optional[str] = None):
             success = await vk_send_message_with_retry(user_id, text, keyboard)
             if success:
                 sent_count += 1
+                user_data_store[user_id]['last_sent_date'] = datetime.now().date()
+                await db.save_user(user_id, user_data_store[user_id])
             else:
                 error_count += 1
             await asyncio.sleep(0.5)
@@ -232,6 +237,8 @@ async def send_day_stress_message(target_user_id: Optional[str] = None):
             success = await vk_send_message_with_retry(user_id, text, keyboard)
             if success:
                 sent_count += 1
+                user_data_store[user_id]['last_sent_date'] = datetime.now().date()
+                await db.save_user(user_id, user_data_store[user_id])
             else:
                 error_count += 1
             await asyncio.sleep(0.3)
@@ -320,27 +327,40 @@ def should_send_message(user_id: str, message_type: str) -> bool:
     user_data = user_data_store.get(user_id, {})
     frequency = user_data.get('notification_frequency', '')
 
+    # Полная поддержка
     if not frequency or frequency.startswith("2-3"):
         return True
 
+    # 1 сообщение в день
     if frequency.startswith("1 сообщение"):
         daily_time = user_data.get('daily_time', '')
-        if daily_time.startswith("Утром"):
-            return message_type == 'morning'
-        elif daily_time.startswith("Днём"):
-            return message_type == 'day'
-        elif daily_time.startswith("Вечером"):
-            return message_type == 'evening'
-        return message_type == 'morning'
+        if daily_time.startswith("Утром") and message_type == 'morning':
+            return True
+        elif daily_time.startswith("Днём") and message_type == 'day':
+            return True
+        elif daily_time.startswith("Вечером") and message_type == 'evening':
+            return True
+        return False
 
+    # Раз в пару дней
     if frequency.startswith("Раз в пару дней"):
+        last_sent = user_data.get('last_sent_date')
+        if last_sent:
+            if isinstance(last_sent, str):
+                from datetime import date
+
+                last_sent = date.fromisoformat(last_sent)
+            days_since = (datetime.now().date() - last_sent).days
+            if days_since < 2:
+                return False
+
         biweekly_time = user_data.get('biweekly_time', '')
-        if biweekly_time.startswith("Утром"):
-            return message_type == 'morning'
-        elif biweekly_time.startswith("Днём"):
-            return message_type == 'day'
-        elif biweekly_time.startswith("Вечером"):
-            return message_type == 'evening'
-        return message_type == 'morning'
+        if biweekly_time.startswith("Утром") and message_type == 'morning':
+            return True
+        elif biweekly_time.startswith("Днём") and message_type == 'day':
+            return True
+        elif biweekly_time.startswith("Вечером") and message_type == 'evening':
+            return True
+        return False
 
     return True

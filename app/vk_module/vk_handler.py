@@ -35,6 +35,7 @@ from app.config import (
     BIWEEKLY_TIME_OPTIONS,
 )
 from app.local_ai import local_ai as ai
+
 # from app.ai import ai
 from app.database import db
 
@@ -427,13 +428,29 @@ class VkHandler:
     async def ai_chat(self, user_id, text):
         session_id = user_data_store[user_id].get('ai_chat_session_id', str(uuid.uuid4()))
         await db.save_ai_chat_message(user_id, session_id, text, "user")
-        from app.handler import detect_situation_from_text
 
-        situation = detect_situation_from_text(text)
-        user_data = user_data_store.get(user_id, {})
-        advice = ai.generate_advice(user_context=text, situation=situation, user_data=user_data)
+        try:
+            from app.handler import detect_situation_from_text
+
+            situation = detect_situation_from_text(text)
+            user_data = user_data_store.get(user_id, {})
+            advice = ai.generate_advice(user_context=text, situation=situation, user_data=user_data)
+        except Exception as e:
+            logger.error(f"Ошибка локальной модели: {e}, переключаюсь на YandexGPT")
+            from app.ai import ai as fallback_ai
+
+            advice = fallback_ai.generate_advice(
+                user_context=text, situation='general', user_data=user_data_store.get(user_id, {})
+            )
+
         await self.send_message(user_id, advice)
-        await db.save_ai_chat_message(user_id, session_id, advice, "assistant", metadata={"situation": situation})
+        await db.save_ai_chat_message(
+            user_id,
+            session_id,
+            advice,
+            "assistant",
+            metadata={"situation": situation if 'situation' in dir() else 'general'},
+        )
 
     # --- обработчики рассылок (логика остаётся без изменений) ---
     async def morning_action_handler(self, user_id, cmd):

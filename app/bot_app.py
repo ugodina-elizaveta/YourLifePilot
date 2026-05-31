@@ -33,17 +33,46 @@ async def load_users_to_cache():
         users = await db.get_all_users()
         for user in users:
             user_id = user['user_id']
+
+            # Преобразуем JSONB-поля
+            scenario = user['scenario']
+            if isinstance(scenario, str):
+                import json
+
+                try:
+                    scenario = json.loads(scenario)
+                except:
+                    scenario = []
+
+            answers = user['answers']
+            if isinstance(answers, str):
+                import json
+
+                try:
+                    answers = json.loads(answers)
+                except:
+                    answers = {}
+
             user_data_store[user_id] = {
                 'username': user['username'],
                 'first_name': user['first_name'],
                 'last_name': user['last_name'],
                 'onboarding_complete': user['onboarding_complete'],
-                'scenario': user['scenario'],
-                'answers': user['answers'],
-                'mood_history': [],  # Будет загружаться по необходимости
+                'scenario': scenario if isinstance(scenario, list) else [],
+                'answers': answers if isinstance(answers, dict) else {},
+                'age_group': user.get('age_group'),
+                'occupation': user.get('occupation'),
+                'morning_time': user.get('morning_time', '09:00'),
+                'evening_time': user.get('evening_time', '21:00'),
+                'physical_limits': user.get('physical_limits'),
+                'notification_frequency': user.get('notification_frequency'),
+                'daily_time': user.get('daily_time'),
+                'biweekly_time': user.get('biweekly_time'),
+                'notification_skip_days': user.get('notification_skip_days', 0),
+                'last_sent_date': user.get('last_sent_date'),
+                'mood_history': [],
             }
 
-            # Загружаем статистику
             stats = await db.get_user_stats(user_id)
             if stats:
                 user_stats_store[user_id] = stats

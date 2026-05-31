@@ -82,6 +82,7 @@ class Database:
                             physical_limits = $12,
                             notification_frequency = $13, daily_time = $14,
                             biweekly_time = $15, notification_skip_days = $16,
+                            last_sent_date = $17,
                             last_active = CURRENT_TIMESTAMP
                         WHERE user_id = $1
                     """,
@@ -101,6 +102,7 @@ class Database:
                         user_data.get("daily_time"),
                         user_data.get("biweekly_time"),
                         user_data.get("notification_skip_days", 0),
+                        user_data.get("last_sent_date"),
                     )
                     logger.info(f"✅ Пользователь {user_id} обновлен в БД")
                 else:
@@ -111,10 +113,10 @@ class Database:
                             onboarding_complete, scenario, answers,
                             age_group, occupation, morning_time, evening_time,
                             physical_limits, notification_frequency, daily_time,
-                            biweekly_time, notification_skip_days,
+                            biweekly_time, notification_skip_days, last_sent_date,
                             created_at, last_active
                         ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb,
-                                $8, $9, $10, $11, $12, $13, $14, $15, $16,
+                                $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
                                 CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                     """,
                         user_id,
@@ -133,6 +135,7 @@ class Database:
                         user_data.get("daily_time"),
                         user_data.get("biweekly_time"),
                         user_data.get("notification_skip_days", 0),
+                        user_data.get("last_sent_date"),
                     )
                     logger.info(f"✅ Новый пользователь {user_id} создан в БД")
                 return True
@@ -370,26 +373,22 @@ class Database:
                 )
 
                 # Статистика по настроениям за 7 дней
-                mood_stats = await conn.fetch(
-                    """
+                mood_stats = await conn.fetch("""
                     SELECT feeling, COUNT(*) as count
                     FROM mood_history
                     WHERE created_at > CURRENT_TIMESTAMP - INTERVAL '7 days'
                     GROUP BY feeling
                     ORDER BY count DESC
-                """
-                )
+                """)
 
                 # Средние streak'и
-                avg_streaks = await conn.fetchrow(
-                    """
+                avg_streaks = await conn.fetchrow("""
                     SELECT
                         AVG(morning_streak) as avg_morning,
                         AVG(evening_streak) as avg_evening,
                         AVG(day_stress_streak) as avg_stress
                     FROM user_stats
-                """
-                )
+                """)
 
                 return {
                     "total_users": total_users,
