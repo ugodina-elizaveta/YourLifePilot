@@ -426,42 +426,30 @@ class VkHandler:
         await self.send_message(user_id, "Режим AI завершён.")
 
     async def ai_chat(self, user_id, text):
-        # Защита от повторной обработки того же сообщения
-        last_msg_id = user_data_store[user_id].get('last_processed_msg_id')
-        last_msg_time = user_data_store[user_id].get('last_processed_msg_time', 0)
+        # ЖЁСТКАЯ защита от дубликатов
+        last_text = user_data_store[user_id].get('_last_ai_text', '')
+        last_time = user_data_store[user_id].get('_last_ai_time', 0)
+        now = datetime.now().timestamp()
 
-        # Если это то же сообщение, что и 5 секунд назад — игнорируем
-        if last_msg_id == text and (datetime.now().timestamp() - last_msg_time) < 5:
-            logger.info(f"Пропущен дубликат сообщения от {user_id}")
+        if last_text == text and (now - last_time) < 180:
+            logger.info(f"⏭️ Дубликат от {user_id}: {text[:40]}...")
             return
 
-        user_data_store[user_id]['last_processed_msg_id'] = text
-        user_data_store[user_id]['last_processed_msg_time'] = datetime.now().timestamp()
+        user_data_store[user_id]['_last_ai_text'] = text
+        user_data_store[user_id]['_last_ai_time'] = now
 
         session_id = user_data_store[user_id].get('ai_chat_session_id', str(uuid.uuid4()))
         await db.save_ai_chat_message(user_id, session_id, text, "user")
 
-        # Генерация ответа
-        try:
-            from app.handler import detect_situation_from_text
+        from app.handler import detect_situation_from_text
 
-            situation = detect_situation_from_text(text)
-            user_data = user_data_store.get(user_id, {})
-            advice = ai.generate_advice(user_context=text, situation=situation, user_data=user_data)
-        except Exception as e:
-            logger.error(f"Ошибка генерации: {e}")
-            advice = "Извини, произошла ошибка. Попробуй ещё раз."
+        situation = detect_situation_from_text(text)
+        user_data = user_data_store.get(user_id, {})
+        advice = ai.generate_advice(user_context=text, situation=situation, user_data=user_data)
 
         await self.send_message(user_id, advice)
-        await db.save_ai_chat_message(
-            user_id,
-            session_id,
-            advice,
-            "assistant",
-            metadata={"situation": situation if 'situation' in dir() else 'general'},
-        )
+        await db.save_ai_chat_message(user_id, session_id, advice, "assistant", metadata={"situation": situation})
 
-    # --- обработчики рассылок (логика остаётся без изменений) ---
     async def morning_action_handler(self, user_id, cmd):
         if cmd == 'morning_normal':
             user_stats_store[user_id]['morning_skip_streak'] = 0

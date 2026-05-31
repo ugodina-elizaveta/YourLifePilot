@@ -77,23 +77,10 @@ class LocalAI:
             )
 
         try:
-            # Ситуационные подсказки
-            situation_hints = {
-                'stress': "Дай практический совет как справиться со стрессом.",
-                'sleep': "Посоветуй что-то простое для улучшения сна.",
-                'sad': "Поддержи тёплыми словами, подними настроение.",
-                'morning': "Посоветуй как начать день бодро.",
-                'evening': "Посоветуй как расслабиться перед сном.",
-                'general': "Дай полезный совет.",
-            }
-            hint = situation_hints.get(situation, situation_hints['general'])
-
             prompt = (
                 "<|system|>\nТы — эмпатичный психологический помощник. "
-                "Отвечай на русском языке. "
-                "Будь поддерживающим и доброжелательным. "
-                "Пиши 3-5 предложений, заканчивай мысль полностью. "
-                f"{hint}<|end|>\n"
+                "Отвечай на русском языке. Будь кратким: 1-3 предложения. "
+                "Не используй странные слова. Пиши осмысленно.<|end|>\n"
                 f"<|user|>\n{user_context}<|end|>\n<|assistant|>\n"
             )
 
@@ -103,10 +90,11 @@ class LocalAI:
             with torch.no_grad():
                 outputs = self.model.generate(
                     **inputs,
-                    max_new_tokens=120,
+                    max_new_tokens=60,
                     temperature=0.7,
                     do_sample=True,
                     top_p=0.9,
+                    repetition_penalty=1.2,
                     pad_token_id=self.tokenizer.eos_token_id,
                     eos_token_id=self.tokenizer.eos_token_id,
                 )
@@ -118,23 +106,15 @@ class LocalAI:
                 if bad in response:
                     response = response.split(bad)[0].strip()
 
-            # Убираем незаконченные предложения в конце
-            if response and response[-1] not in '.!?':
-                # Находим последний знак препинания
-                for i in range(len(response) - 1, 0, -1):
-                    if response[i] in '.!?':
-                        response = response[: i + 1]
-                        break
+            if not response or len(response) < 5:
+                response = "Расскажи подробнее, что тебя беспокоит. Я постараюсь помочь."
 
-            if not response or len(response) < 10:
-                response = "Понимаю тебя. Расскажи подробнее, что тебя беспокоит."
-
-            logger.info(f"✅ Ответ ({len(response)} символов): {response[:100]}...")
+            logger.info(f"✅ Ответ ({len(response)} символов): {response[:80]}...")
             return response
 
         except Exception as e:
             logger.error(f"❌ Ошибка генерации: {e}")
-            return "Извини, сейчас я немного загружен. Попробуй ещё раз."
+            return "Извини, произошла ошибка. Попробуй ещё раз."
 
     def analyze_sentiment(self, text: str) -> dict:
         return {'label': 'NEUTRAL', 'score': 0.5}
