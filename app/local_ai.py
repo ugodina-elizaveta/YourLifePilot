@@ -77,10 +77,9 @@ class LocalAI:
 
         try:
             prompt = (
-                "<|system|>\nТы — заботливый русскоязычный помощник. "
-                "Отвечай ТОЛЬКО на русском языке. "
-                "Пиши кратко: 1-3 предложения. "
-                "Будь доброжелательным.<|end|>\n"
+                "<|system|>\nТы — эмпатичный психологический помощник. "
+                "Отвечай на русском языке, поддерживай и помогай. "
+                "Будь кратким: 2-3 предложения.<|end|>\n"
                 f"<|user|>\n{user_context}<|end|>\n<|assistant|>\n"
             )
 
@@ -90,43 +89,28 @@ class LocalAI:
             with torch.no_grad():
                 outputs = self.model.generate(
                     **inputs,
-                    max_new_tokens=80,
-                    temperature=0.9,  # выше = разнообразнее
+                    max_new_tokens=60,
+                    temperature=0.7,
                     do_sample=True,
-                    top_p=0.92,
-                    top_k=60,
-                    repetition_penalty=1.25,  # сильнее штраф за повторы
+                    top_p=0.9,
                     pad_token_id=self.tokenizer.eos_token_id,
                     eos_token_id=self.tokenizer.eos_token_id,
                 )
 
             response = self.tokenizer.decode(outputs[0][input_len:], skip_special_tokens=True).strip()
 
-            # Очистка от тегов
             for bad in ['<|end|>', '<|user|>', '<|system|>', '<|assistant|>']:
                 if bad in response:
                     response = response.split(bad)[0].strip()
 
-            # Убираем латинские слова из русского текста
-            import re
-
-            words = response.split()
-            cleaned_words = []
-            for w in words:
-                # Если слово содержит латиницу и это не общепринятое — пропускаем
-                if re.search(r'[a-zA-Z]', w) and not re.search(r'[а-яёА-ЯЁ]', w):
-                    continue
-                cleaned_words.append(w)
-            response = ' '.join(cleaned_words)
-
-            # Обрезка до последнего знака препинания
+            # Обрезка до последнего законченного предложения
             for i in range(len(response) - 1, 0, -1):
                 if response[i] in '.!?':
                     response = response[: i + 1]
                     break
 
             if not response or len(response) < 5:
-                return "Расскажи подробнее, что тебя беспокоит. Я постараюсь помочь."
+                response = "Расскажи подробнее, что тебя беспокоит. Я постараюсь помочь."
 
             logger.info(f"✅ Ответ ({len(response)} символов): {response[:80]}...")
             return response
