@@ -64,7 +64,6 @@ class LocalAI:
         if not self.is_loaded:
             return "Извини, модель ещё загружается. Попробуй через минуту."
 
-        # Проверка запрещённых тем
         from app.config import FORBIDDEN_TOPICS
 
         if any(word in user_context.lower() for word in FORBIDDEN_TOPICS):
@@ -78,9 +77,10 @@ class LocalAI:
 
         try:
             prompt = (
-                "<|system|>\nТы — эмпатичный психологический помощник. "
-                "Отвечай на русском языке. Будь кратким: 1-3 предложения. "
-                "Не используй странные слова. Пиши осмысленно.<|end|>\n"
+                "<|system|>\nТы — заботливый русскоязычный помощник. "
+                "Отвечай ТОЛЬКО на русском языке. "
+                "Пиши кратко: 1-3 предложения. "
+                "Будь доброжелательным.<|end|>\n"
                 f"<|user|>\n{user_context}<|end|>\n<|assistant|>\n"
             )
 
@@ -91,20 +91,33 @@ class LocalAI:
                 outputs = self.model.generate(
                     **inputs,
                     max_new_tokens=80,
-                    temperature=0.7,
+                    temperature=0.9,  # выше = разнообразнее
                     do_sample=True,
-                    top_p=0.9,
-                    repetition_penalty=1.2,
+                    top_p=0.92,
+                    top_k=60,
+                    repetition_penalty=1.25,  # сильнее штраф за повторы
                     pad_token_id=self.tokenizer.eos_token_id,
                     eos_token_id=self.tokenizer.eos_token_id,
                 )
 
             response = self.tokenizer.decode(outputs[0][input_len:], skip_special_tokens=True).strip()
 
-            # Мягкая очистка: обрезаем только явный мусор
+            # Очистка от тегов
             for bad in ['<|end|>', '<|user|>', '<|system|>', '<|assistant|>']:
                 if bad in response:
                     response = response.split(bad)[0].strip()
+
+            # Убираем латинские слова из русского текста
+            import re
+
+            words = response.split()
+            cleaned_words = []
+            for w in words:
+                # Если слово содержит латиницу и это не общепринятое — пропускаем
+                if re.search(r'[a-zA-Z]', w) and not re.search(r'[а-яёА-ЯЁ]', w):
+                    continue
+                cleaned_words.append(w)
+            response = ' '.join(cleaned_words)
 
             # Обрезка до последнего знака препинания
             for i in range(len(response) - 1, 0, -1):
@@ -113,7 +126,7 @@ class LocalAI:
                     break
 
             if not response or len(response) < 5:
-                response = "Расскажи подробнее, что тебя беспокоит. Я постараюсь помочь."
+                return "Расскажи подробнее, что тебя беспокоит. Я постараюсь помочь."
 
             logger.info(f"✅ Ответ ({len(response)} символов): {response[:80]}...")
             return response
