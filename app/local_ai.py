@@ -90,7 +90,7 @@ class LocalAI:
             with torch.no_grad():
                 outputs = self.model.generate(
                     **inputs,
-                    max_new_tokens=60,
+                    max_new_tokens=80,
                     temperature=0.7,
                     do_sample=True,
                     top_p=0.9,
@@ -105,6 +105,12 @@ class LocalAI:
             for bad in ['<|end|>', '<|user|>', '<|system|>', '<|assistant|>']:
                 if bad in response:
                     response = response.split(bad)[0].strip()
+
+            # Обрезка до последнего знака препинания
+            for i in range(len(response) - 1, 0, -1):
+                if response[i] in '.!?':
+                    response = response[: i + 1]
+                    break
 
             if not response or len(response) < 5:
                 response = "Расскажи подробнее, что тебя беспокоит. Я постараюсь помочь."
