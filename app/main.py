@@ -110,14 +110,22 @@ async def vk_webhook(request: Request):
     if event_type == "message_new":
         last_activity = datetime.now()
         message = data["object"]["message"]
-        message_id = str(message.get("conversation_message_id", message.get("id")))
+        message_id = str(message.get("id"))  # ID сообщения — уникален
         from_id = str(message.get("from_id"))
 
+        # Защита по message_id — VK может слать одно сообщение с разными event_id
         msg_key = f"msg_{from_id}_{message_id}"
         if msg_key in processed_messages:
+            logger.debug(f"Duplicate message ignored: {msg_key}")
             return PlainTextResponse("ok")
 
         processed_messages[msg_key] = datetime.now()
+
+        # Очистка старых записей (старше 1 часа)
+        if len(processed_messages) > 1000:
+            cutoff = datetime.now() - timedelta(hours=1)
+            processed_messages = {k: v for k, v in processed_messages.items() if v > cutoff}
+
         logger.info(f"New message from VK user {from_id}: {message.get('text', '')[:50]}")
         await vk_bot.process_message(message)
         return PlainTextResponse("ok")
