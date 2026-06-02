@@ -103,7 +103,7 @@ async def send_morning_message(target_user_id: Optional[str] = None):
             success = await vk_send_message_with_retry(user_id, text, keyboard)
             if success:
                 sent_count += 1
-                user_data_store[user_id]['last_sent_date'] = datetime.now().date()
+                user_data_store[user_id]['last_sent_date'] = datetime.now().date().isoformat()
                 await db.save_user(user_id, user_data_store[user_id])
             else:
                 error_count += 1
@@ -178,7 +178,7 @@ async def send_evening_message(target_user_id: Optional[str] = None):
             success = await vk_send_message_with_retry(user_id, text, keyboard)
             if success:
                 sent_count += 1
-                user_data_store[user_id]['last_sent_date'] = datetime.now().date()
+                user_data_store[user_id]['last_sent_date'] = datetime.now().date().isoformat()
                 await db.save_user(user_id, user_data_store[user_id])
             else:
                 error_count += 1
@@ -237,7 +237,7 @@ async def send_day_stress_message(target_user_id: Optional[str] = None):
             success = await vk_send_message_with_retry(user_id, text, keyboard)
             if success:
                 sent_count += 1
-                user_data_store[user_id]['last_sent_date'] = datetime.now().date()
+                user_data_store[user_id]['last_sent_date'] = datetime.now().date().isoformat()
                 await db.save_user(user_id, user_data_store[user_id])
             else:
                 error_count += 1
