@@ -76,12 +76,50 @@ class LocalAI:
             )
 
         try:
-            prompt = (
-                "<|system|>\nТы — эмпатичный психологический помощник. "
-                "Отвечай на русском языке, поддерживай и помогай. "
-                "Будь кратким: 2-3 предложения.<|end|>\n"
-                f"<|user|>\n{user_context}<|end|>\n<|assistant|>\n"
+            #  ПЕРСОНАЛИЗАЦИЯ===
+            personal_info = ""
+            if user_data:
+                age = user_data.get('age_group', '')
+                occupation = user_data.get('occupation', '')
+                physical_limits = user_data.get('physical_limits', '')
+
+                age_map = {
+                    "До 18": "подросток",
+                    "18–24": "молодой человек",
+                    "25–34": "человек в активном возрасте",
+                    "35–44": "человек среднего возраста",
+                    "45+": "человек старшего возраста",
+                }
+                occ_map = {
+                    "Учусь": "студент",
+                    "Работаю": "работающий",
+                    "Работаю и учусь": "работающий студент",
+                    "Не учусь и не работаю": "в поиске себя",
+                }
+
+                parts = []
+                if age in age_map:
+                    parts.append(age_map[age])
+                if occupation in occ_map:
+                    parts.append(occ_map[occupation])
+
+                if parts:
+                    personal_info = "Ты " + ", ".join(parts) + ". "
+
+                if physical_limits and physical_limits != "Без ограничений":
+                    personal_info += (
+                        f"ВАЖНО: У пользователя есть ограничения: {physical_limits}. "
+                        "НЕ рекомендуй физические упражнения, бег, интенсивные нагрузки. "
+                    )
+
+            system_prompt = (
+                f"{personal_info}"
+                "Ты — эмпатичный помощник. Отвечай кратко, "
+                "поддерживающе, на русском. 2-3 предложения."
             )
+            # ===============================
+
+            prompt = f"<|system|>\n{system_prompt}<|end|>\n" f"<|user|>\n{user_context}<|end|>\n<|assistant|>\n"
 
             inputs = self.tokenizer(prompt, return_tensors="pt")
             input_len = inputs.input_ids.shape[1]
